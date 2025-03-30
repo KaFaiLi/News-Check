@@ -1,6 +1,6 @@
 # Google News Scraper
 
-A Python-based web scraper for extracting news articles from Google News. This tool allows you to search for news articles based on keywords and date ranges, with built-in pagination support and robust error handling.
+A Python-based web scraper for Google News that includes sentiment analysis using BERT.
 
 ## Features
 
@@ -11,11 +11,12 @@ A Python-based web scraper for extracting news articles from Google News. This t
   - URL
   - Snippet/Description
   - Published Time
+  - Source
+- Sentiment analysis using BERT model
 - Automatic pagination handling
 - Export results to CSV and Excel formats
 - Built-in rate limiting and retry mechanism
 - Comprehensive error handling
-- Extensive test coverage
 
 ## Installation
 
@@ -23,7 +24,7 @@ A Python-based web scraper for extracting news articles from Google News. This t
 2. Install the required dependencies:
 
 ```bash
-pip install requests beautifulsoup4 pandas
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -49,53 +50,39 @@ df.to_csv('news_results.csv', index=False)
 df.to_excel('news_results.xlsx', index=False)
 ```
 
-### Advanced Configuration
+### Sentiment Analysis
 
-You can customize the scraping behavior with additional parameters:
+The scraper includes BERT-based sentiment analysis for each article title. The sentiment is classified as:
+- Positive: score > 0.6 (3+ stars out of 5)
+- Negative: score < 0.4 (2 or fewer stars out of 5)
+- Neutral: score between 0.4 and 0.6
 
-```python
-df = scraper.scrape_news(
-    keywords=['AI', 'ML'],
-    start_date='2024-01-01',
-    end_date='2024-01-01',
-    max_retries=3,      # Maximum number of retry attempts
-    initial_delay=2     # Initial delay between requests (seconds)
-)
-```
-
-## Testing
-
-The project includes comprehensive test coverage:
-
-```bash
-python test_scraper.py
-```
-
-Test cases include:
-- Basic news article scraping
-- Empty results handling
-- HTML structure changes
-- Error handling scenarios
-
-## Important Notes
-
-1. **Rate Limiting**: The scraper implements exponential backoff to avoid overwhelming Google's servers. Adjust the `initial_delay` parameter if needed.
-
-2. **HTML Structure**: The scraper is designed to handle various HTML structures and class names that Google News might use. Test cases ensure robustness against structure changes.
-
-3. **Error Handling**: The scraper includes comprehensive error handling for:
-   - Network issues
-   - Invalid URLs
-   - Rate limiting
-   - Malformed HTML
-   - Missing data fields
+The sentiment analysis results are included in the output DataFrame and exported files.
 
 ## Output Format
 
-The scraper returns a pandas DataFrame with the following columns:
-- keywords: Search term used
+The scraper generates a DataFrame with the following columns:
+- keywords: The search keyword used
 - title: Article title
 - url: Article URL
 - snippet: Article description/snippet
-- published_time: Publication time/date
-# News-Check
+- published_time: Publication time
+- sentiment: Sentiment analysis result (positive/negative/neutral)
+
+## Error Handling
+
+The scraper includes:
+- Automatic retry mechanism with exponential backoff
+- Rate limiting to avoid overloading the server
+- Comprehensive error reporting
+- Graceful handling of missing data
+
+## Dependencies
+
+See requirements.txt for detailed version information:
+- requests
+- beautifulsoup4
+- pandas
+- transformers
+- torch
+- openpyxl

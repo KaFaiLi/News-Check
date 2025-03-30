@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
 import time
+from transformers import pipeline
 
 class GoogleNewsScraper:
     def __init__(self):
@@ -14,6 +15,27 @@ class GoogleNewsScraper:
     def format_date(self, date):
         """Format date to Google News format"""
         return date.strftime('%m/%d/%Y')
+
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        self.base_url = 'https://www.google.com/search'
+        # Initialize BERT sentiment analyzer
+        self.sentiment_analyzer = pipeline('sentiment-analysis', model='nlptown/bert-base-multilingual-uncased-sentiment')
+
+    def analyze_sentiment(self, text):
+        """Analyze sentiment of text using BERT"""
+        result = self.sentiment_analyzer(text)[0]
+        score = float(result['label'].split()[0]) / 5.0  # Convert 1-5 score to 0-1 range
+        
+        # Classify sentiment based on score
+        if score > 0.6:  # 3+ stars out of 5
+            return 'positive'
+        elif score < 0.4:  # 2 or fewer stars out of 5
+            return 'negative'
+        else:
+            return 'neutral'
 
     def scrape_news(self, keywords, start_date, end_date, max_retries=3, initial_delay=2):
         """Scrape news articles based on keywords and date range"""
@@ -91,14 +113,18 @@ class GoogleNewsScraper:
                             time_element = article.find('div', {'class': 'OSrXXb'})
                             published_time = time_element.text.strip() if time_element else ''
                             
-                            print(f'Found article: {title[:50]}...')
+                            # Analyze sentiment of the title
+                            sentiment = self.analyze_sentiment(title)
+                            
+                            print(f'Found article: {title[:50]}... (Sentiment: {sentiment})')
                             
                             results.append({
                                 'keywords': keyword,
                                 'title': title,
                                 'url': url,
                                 'snippet': snippet,
-                                'published_time': published_time
+                                'published_time': published_time,
+                                'sentiment': sentiment
                             })
                     
                     # Check if we should continue to the next page
@@ -131,7 +157,13 @@ class GoogleNewsScraper:
                     break
         
         # Convert results to DataFrame
-        return pd.DataFrame(results)
+        df = pd.DataFrame(results)
+        
+        # Create a directory for output if it doesn't exist
+        import os
+        os.makedirs('Output', exist_ok=True)
+        
+        return df
 
 # Example usage
 def main():
@@ -146,10 +178,17 @@ def main():
     # Scrape news
     df = scraper.scrape_news(keywords, start_date, end_date)
     
-    # Save to CSV
+    # Save to CSV and Excel with sentiment analysis results
     df.to_csv('Output/news_results.csv', index=False)
     df.to_excel('Output/news_results.xlsx', index=False)
-    print(f'Scraped {len(df)} articles and saved to news_results.csv')
+    
+    # Print summary of sentiment analysis
+    sentiment_counts = df['sentiment'].value_counts()
+    print(f'\nScraped {len(df)} articles and saved to news_results.csv')
+    print('\nSentiment Analysis Summary:')
+    print(f'Positive articles: {sentiment_counts.get("positive", 0)}')
+    print(f'Negative articles: {sentiment_counts.get("negative", 0)}')
+    print(f'Neutral articles: {sentiment_counts.get("neutral", 0)}')
 
 if __name__ == '__main__':
     main()
