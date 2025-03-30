@@ -21,21 +21,32 @@ class GoogleNewsScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         self.base_url = 'https://www.google.com/search'
-        # Initialize BERT sentiment analyzer
-        self.sentiment_analyzer = pipeline('sentiment-analysis', model='nlptown/bert-base-multilingual-uncased-sentiment')
+        # Initialize FinBERT sentiment analyzer and financial topic classifier
+        self.sentiment_analyzer = pipeline('sentiment-analysis', model='ProsusAI/finbert')
+        self.topic_classifier = pipeline('zero-shot-classification', model='facebook/bart-large-mnli')
+        self.topic_categories = [
+            'Regulatory Compliance', 'Financial Crime', 'Market Risk', 'Corporate Governance',
+            'Banking', 'Investment', 'Insurance', 'Fraud Detection', 'AML', 'KYC Updates'
+        ]
 
     def analyze_sentiment(self, text):
         """Analyze sentiment of text using BERT"""
         result = self.sentiment_analyzer(text)[0]
-        score = float(result['label'].split()[0]) / 5.0  # Convert 1-5 score to 0-1 range
+        label = result['label'].lower()
         
-        # Classify sentiment based on score
-        if score > 0.6:  # 3+ stars out of 5
-            return 'positive'
-        elif score < 0.4:  # 2 or fewer stars out of 5
-            return 'negative'
-        else:
-            return 'neutral'
+        # FinBERT returns 'positive', 'negative', or 'neutral' directly
+        return label
+            
+    def analyze_topic(self, title, snippet):
+        """Analyze topic of the article using zero-shot classification"""
+        # Combine title and snippet for better topic analysis
+        full_text = f"{title}. {snippet}"
+        result = self.topic_classifier(
+            full_text,
+            candidate_labels=self.topic_categories,
+            multi_label=False
+        )
+        return result['labels'][0]  # Return the most likely topic
 
     def scrape_news(self, keywords, start_date, end_date, max_retries=3, initial_delay=2):
         """Scrape news articles based on keywords and date range"""
@@ -113,10 +124,11 @@ class GoogleNewsScraper:
                             time_element = article.find('div', {'class': 'OSrXXb'})
                             published_time = time_element.text.strip() if time_element else ''
                             
-                            # Analyze sentiment of the title
+                            # Analyze sentiment and topic
                             sentiment = self.analyze_sentiment(title)
+                            topic = self.analyze_topic(title, snippet)
                             
-                            print(f'Found article: {title[:50]}... (Sentiment: {sentiment})')
+                            print(f'Found article: {title[:50]}... (Sentiment: {sentiment}, Topic: {topic})')
                             
                             results.append({
                                 'keywords': keyword,
@@ -124,7 +136,8 @@ class GoogleNewsScraper:
                                 'url': url,
                                 'snippet': snippet,
                                 'published_time': published_time,
-                                'sentiment': sentiment
+                                'sentiment': sentiment,
+                                'topic': topic
                             })
                     
                     # Check if we should continue to the next page
@@ -171,9 +184,9 @@ def main():
     scraper = GoogleNewsScraper()
     
     # Define search parameters
-    keywords = ['artificial intelligence', 'machine learning', 'Trump']
-    start_date = '2023-01-01'
-    end_date = '2023-01-01'
+    keywords = ['Soc Gen', 'JPM', 'Hong Kong']
+    start_date = '2025-01-01'
+    end_date = '2025-01-01'
     
     # Scrape news
     df = scraper.scrape_news(keywords, start_date, end_date)
@@ -188,6 +201,12 @@ def main():
     print('\nSentiment Analysis Summary:')
     print(f'Positive articles: {sentiment_counts.get("positive", 0)}')
     print(f'Negative articles: {sentiment_counts.get("negative", 0)}')
+    
+    # Print summary of topics
+    topic_counts = df['topic'].value_counts()
+    print('\nTopic Distribution:')
+    for topic, count in topic_counts.items():
+        print(f'{topic}: {count} articles')
     print(f'Neutral articles: {sentiment_counts.get("neutral", 0)}')
 
 if __name__ == '__main__':

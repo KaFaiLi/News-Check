@@ -1,22 +1,44 @@
-# Google News Scraper
+# News-Check
 
-A Python-based web scraper for Google News that includes sentiment analysis using BERT.
+A Python-based news scraping tool that collects articles from Google News, performs sentiment analysis, and classifies financial topics using Hugging Face models.
 
 ## Features
 
-- Search news articles by multiple keywords
-- Filter articles by date range
-- Extract comprehensive article information:
-  - Title
-  - URL
-  - Snippet/Description
-  - Published Time
-  - Source
-- Sentiment analysis using BERT model
-- Automatic pagination handling
-- Export results to CSV and Excel formats
-- Built-in rate limiting and retry mechanism
-- Comprehensive error handling
+- Scrapes news articles from Google News
+- Performs sentiment analysis using FinBERT
+- Classifies financial topics using BART
+- Supports date range filtering
+- Exports results to CSV and Excel formats
+
+## Model Setup
+
+This project uses two Hugging Face models that will be automatically downloaded on first use:
+
+1. **FinBERT Model (Sentiment Analysis)**
+   - Model: `ProsusAI/finbert`
+   - Default storage location: `%USERPROFILE%\.cache\huggingface\hub`
+   - Size: ~1.2GB
+
+2. **BART Model (Topic Classification)**
+   - Model: `facebook/bart-large-mnli`
+   - Default storage location: `%USERPROFILE%\.cache\huggingface\hub`
+   - Size: ~1.6GB
+
+Note: The models will be downloaded automatically when you first run the script. Ensure you have sufficient disk space (approximately 3GB) in your user directory.
+
+## Topic Categories
+
+The tool classifies news articles into the following categories:
+- Regulatory Compliance
+- Financial Crime
+- Market Risk
+- Corporate Governance
+- Banking
+- Investment
+- Insurance
+- Fraud Detection
+- AML
+- KYC Updates
 
 ## Installation
 
@@ -38,28 +60,19 @@ from news_scraper import GoogleNewsScraper
 scraper = GoogleNewsScraper()
 
 # Define search parameters
-keywords = ['artificial intelligence', 'machine learning']
+keywords = ['Soc Gen', 'JPM', 'Hong Kong']
 start_date = '2024-01-01'
-end_date = '2024-01-01'
+end_date = '2024-01-31'
 
 # Scrape news articles
 df = scraper.scrape_news(keywords, start_date, end_date)
 
-# Save results
-df.to_csv('news_results.csv', index=False)
-df.to_excel('news_results.xlsx', index=False)
+# Results will be automatically saved to:
+# - Output/news_results.csv
+# - Output/news_results.xlsx
 ```
 
-### Sentiment Analysis
-
-The scraper includes BERT-based sentiment analysis for each article title. The sentiment is classified as:
-- Positive: score > 0.6 (3+ stars out of 5)
-- Negative: score < 0.4 (2 or fewer stars out of 5)
-- Neutral: score between 0.4 and 0.6
-
-The sentiment analysis results are included in the output DataFrame and exported files.
-
-## Output Format
+### Output Format
 
 The scraper generates a DataFrame with the following columns:
 - keywords: The search keyword used
@@ -68,18 +81,11 @@ The scraper generates a DataFrame with the following columns:
 - snippet: Article description/snippet
 - published_time: Publication time
 - sentiment: Sentiment analysis result (positive/negative/neutral)
-
-## Error Handling
-
-The scraper includes:
-- Automatic retry mechanism with exponential backoff
-- Rate limiting to avoid overloading the server
-- Comprehensive error reporting
-- Graceful handling of missing data
+- topic: Classified financial topic
 
 ## Dependencies
 
-See requirements.txt for detailed version information:
+Required packages:
 - requests
 - beautifulsoup4
 - pandas
