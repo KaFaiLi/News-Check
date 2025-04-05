@@ -6,14 +6,8 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 from fuzzywuzzy import fuzz
-from sklearn.cluster import KMeans
-from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-import os
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+from config import OPENAI_API_KEY, OPENAI_API_BASE
 
 class ArticleAnalysis(BaseModel):
     relevance_score: float = Field(description="Relevance score from 0-1")
@@ -25,12 +19,12 @@ class ContentAnalyzer:
         self.llm = ChatOpenAI(
             model_name="openai/gpt-4o-mini",
             temperature=0.2,
-            api_key=os.getenv('OPENAI_API_KEY'),
-            base_url=os.getenv('OPENAI_API_BASE')
+            api_key=OPENAI_API_KEY,
+            base_url=OPENAI_API_BASE
         )
         self.embeddings = OpenAIEmbeddings(
-            api_key=os.getenv('OPENAI_API_KEY'),
-            base_url=os.getenv('OPENAI_API_BASE')
+            api_key=OPENAI_API_KEY,
+            base_url=OPENAI_API_BASE
         )
         self.structured_llm = self.llm.with_structured_output(ArticleAnalysis)
         self.analysis_prompt = "Article Title: {title}\nSource: {source}\nDate: {date}\nContent: {content}\n\nAs an AI expert specializing in financial services and banking regulations, analyze this article's relevance for banking auditors focusing on AI developments."
@@ -68,51 +62,48 @@ class ContentAnalyzer:
         text = f"{article['title']} {article.get('snippet', '')}"
         return self.embeddings.embed_query(text)
 
-    def cluster_articles(self, articles: List[Dict], n_clusters: int = 10) -> List[Dict]:
-        """Cluster articles using embeddings and select representatives"""
-        if len(articles) <= n_clusters:
-            return articles
+    def calculate_trending_score(self, article: Dict, all_articles: List[Dict], time_weight: float = 0.6) -> float:
+        """Calculate trending score based on frequency and time-based analysis"""
+        # Calculate frequency score (how many similar articles exist)
+        frequency_score = 0
+        for other_article in all_articles:
+            if other_article != article:
+                similarity = fuzz.ratio(article['title'].lower(), other_article['title'].lower())
+                if similarity > 60:  # Lower threshold for counting related articles
+                    frequency_score += 1
+        frequency_score = min(frequency_score / 10, 1.0)  # Normalize to 0-1
 
-        # Get embeddings for all articles
-        embeddings = [self.get_article_embedding(article) for article in articles]
-        embeddings_array = np.array(embeddings)
+        # Calculate time score (how recent the article is)
+        try:
+            article_time = datetime.fromisoformat(article.get('published_time', datetime.now().isoformat()))
+            time_diff = datetime.now() - article_time
+            time_score = max(1 - (time_diff.total_seconds() / (7 * 24 * 3600)), 0)  # 7 days window
+        except:
+            time_score = 0.5  # Default score if date parsing fails
 
-        # Perform clustering
-        kmeans = KMeans(n_clusters=min(n_clusters, len(articles)), random_state=42)
-        cluster_labels = kmeans.fit_predict(embeddings_array)
-
-        # Select representative articles from each cluster
-        representatives = []
-        for i in range(max(cluster_labels) + 1):
-            cluster_articles = [article for j, article in enumerate(articles) if cluster_labels[j] == i]
-            if cluster_articles:
-                # Select article closest to cluster center
-                cluster_center = kmeans.cluster_centers_[i]
-                similarities = cosine_similarity([cluster_center], embeddings_array[cluster_labels == i])[0]
-                representative = cluster_articles[np.argmax(similarities)]
-                representatives.append(representative)
-
-        return representatives
+        # Combine scores with weights
+        trending_score = (time_weight * time_score) + ((1 - time_weight) * frequency_score)
+        return trending_score
 
     def rank_articles(self, articles: List[Dict]) -> List[Dict]:
-        """Rank articles based on clustering and relevance"""
+        """Rank articles based on trending score and relevance"""
         # First remove duplicates
         unique_articles = self.remove_duplicates(articles)
         
-        # Cluster articles to get representatives
-        clustered_articles = self.cluster_articles(unique_articles)
-        
-        # Analyze representative articles
+        # Calculate trending scores and analyze articles
         analyzed_articles = []
-        for article in clustered_articles:
+        for article in unique_articles:
             analysis = self.analyze_article(article)
             if analysis:
                 article['analysis'] = analysis
                 article['relevance_score'] = analysis.relevance_score
+                article['trending_score'] = self.calculate_trending_score(article, unique_articles)
+                # Combined score weighs both trending and relevance
+                article['final_score'] = 0.7 * article['trending_score'] + 0.3 * article['relevance_score']
                 analyzed_articles.append(article)
 
-        # Sort by relevance score
-        analyzed_articles.sort(key=lambda x: x['relevance_score'], reverse=True)
+        # Sort by final score
+        analyzed_articles.sort(key=lambda x: x['final_score'], reverse=True)
         return analyzed_articles[:10]  # Return top 10 articles
 
     def generate_quarterly_summary(self, top_articles: List[Dict]) -> Dict:
