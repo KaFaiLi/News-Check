@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from src.config import OPENAI_API_KEY, OPENAI_API_BASE, OUTPUT_DIR
 from src.models import ArticleAnalysis, TrendAnalysis, BriefSummary, DetailedReport
+from urllib.parse import urljoin
 
 class DocumentGenerator:
     def __init__(self, output_dir=OUTPUT_DIR, llm_instance: Optional[ChatOpenAI] = None):
@@ -71,7 +72,7 @@ class DocumentGenerator:
             print("Generating overall summary with LLM...")
             response = self.summary_chain.invoke({"article_summaries": formatted_input})
             print("Overall summary generated.")
-            return str(response.content) # Extract content from the response object
+            return str(response.content)
         except Exception as e:
             print(f"Error generating overall summary with LLM: {e}")
             return f"Overall summary could not be generated due to an error: {e}"
@@ -86,7 +87,13 @@ class DocumentGenerator:
 
         self._add_styled_paragraph(document, "Brief News Summary", size=16, bold=True, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
         self._add_styled_paragraph(document, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", size=10, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
-        document.add_paragraph() # Add spacing
+        document.add_paragraph()
+
+        # Add overall summary at the top
+        overall_summary_text = self._generate_overall_summary(top_articles)
+        self._add_styled_paragraph(document, "Overall Summary", size=12, bold=True)
+        self._add_styled_paragraph(document, overall_summary_text, size=11)
+        document.add_paragraph()
 
         # Include only the top 3 articles for the brief summary
         for i, item in enumerate(top_articles[:3], 1):
@@ -95,86 +102,78 @@ class DocumentGenerator:
             title = article.get('title', 'No Title Provided')
             source = article.get('source', 'Unknown Source')
             pub_time_str = article.get('published_time', 'Unknown Time')
-            # Safely parse date
-            try:
-                 pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
-            except:
-                 pub_time = pub_time_str # Keep original if parsing fails
-
             url = article.get('url', '#')
-            # Ensure insights are handled correctly (might be None or require .content)
+            
+            try:
+                pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
+            except:
+                pub_time = pub_time_str
+
             insights = analysis.get('insights', 'No analysis available.')
             insights_str = str(insights) if insights else 'No analysis available.'
 
-
+            # Add content as styled paragraphs
             self._add_styled_paragraph(document, f"{i}. {title}", size=12, bold=True)
             self._add_styled_paragraph(document, f"   Source: {source} | Published: {pub_time}", size=10)
             self._add_styled_paragraph(document, f"   Analysis: {insights_str}", size=11)
             p = self._add_styled_paragraph(document, f"   Link: ", size=10)
-            # Simple link adding (no hyperlink capability in basic python-docx text)
             p.add_run(url).font.size = Pt(10)
-            document.add_paragraph() # Add spacing between articles
+
+            # Add spacing after each article
+            document.add_paragraph()
 
         document.save(filepath)
         return filepath
 
     def generate_detailed_report(self, top_articles: List[Dict]):
-        """Generates a detailed Word document report including an overall summary."""
+        """Generates a detailed Word document report including a table of contents."""
         document = Document()
         self._set_doc_margins(document)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"detailed_news_report_{timestamp}.docx"
         filepath = os.path.join(self.output_dir, filename)
 
+        # Add title
         self._add_styled_paragraph(document, "Detailed News Report", size=16, bold=True, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
         self._add_styled_paragraph(document, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", size=10, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
-        document.add_paragraph() # Add spacing
+        document.add_paragraph()
 
-        # --- Add Overall Summary and Fixed Intro Lines ---
-        overall_summary_text = self._generate_overall_summary(top_articles)
-        self._add_styled_paragraph(document, "Overall Summary", size=12, bold=True)
-        self._add_styled_paragraph(document, overall_summary_text, size=11) # Add the LLM summary
-        document.add_paragraph() # Spacing
+        # Add Table of Contents
+        self._add_styled_paragraph(document, "Table of Contents", size=14, bold=True)
+        for i, item in enumerate(top_articles, 1):
+            title = item.get('article', {}).get('title', 'No Title Provided')
+            toc_paragraph = self._add_styled_paragraph(document, f"{i}. {title}", size=11)
+            toc_paragraph.paragraph_format.left_indent = Inches(0.25)
+        document.add_paragraph()  # Add spacing after TOC
 
         # Add the fixed introductory lines
         self._add_styled_paragraph(document, "The following are the top news items for review.", size=11)
         self._add_styled_paragraph(document, "For more detailed analysis of each article, please refer to the individual insights provided below or the source links.", size=11)
-        document.add_paragraph() # Spacing before the list
-        # --- End Overall Summary Section ---
+        document.add_paragraph()
 
-
-        self._add_styled_paragraph(document, "Top News Details", size=14, bold=True) # Heading for the list
-
+        # Add detailed articles
+        self._add_styled_paragraph(document, "Top News Details", size=14, bold=True)
 
         for i, item in enumerate(top_articles, 1):
             article = item.get('article', {})
             analysis = item.get('analysis', {})
-            scores = analysis.get('scores', {})
-            # Determine primary category
-            primary_category = max(scores, key=scores.get) if scores else "N/A"
-            overall_score_pct = analysis.get('overall_score', 0) * 100
-
             title = article.get('title', 'No Title Provided')
             source = article.get('source', 'Unknown Source')
             pub_time_str = article.get('published_time', 'Unknown Time')
-            # Safely parse date
-            try:
-                 pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
-            except:
-                 pub_time = pub_time_str
-
             url = article.get('url', '#')
-            # Ensure insights are handled correctly
+
+            try:
+                pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
+            except:
+                pub_time = pub_time_str
+
             insights = analysis.get('insights', 'No analysis available.')
             insights_str = str(insights) if insights else 'No analysis available.'
 
-
             self._add_styled_paragraph(document, f"{i}. {title}", size=12, bold=True)
             self._add_styled_paragraph(document, f"   Source: {source} | Published: {pub_time}", size=10)
-            self._add_styled_paragraph(document, f"   Category: {primary_category} | Relevance Score: {overall_score_pct:.1f}%", size=10)
             self._add_styled_paragraph(document, f"   Analysis: {insights_str}", size=11)
             p = self._add_styled_paragraph(document, f"   Link: ", size=10)
-            # Simple link adding
             p.add_run(url).font.size = Pt(10)
             document.add_paragraph()
 

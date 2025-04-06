@@ -93,14 +93,14 @@ class GoogleNewsScraper:
              return pd.DataFrame() # Return empty DataFrame on invalid date
         
         results = []
-        total_articles_target = max_articles if max_articles is not None else float('inf') # Overall limit if provided
+        total_articles_target = max_articles if max_articles is not None else float('inf')
         articles_collected_total = 0
         
         # Update max articles per keyword if overall limit is lower than default per keyword
-        current_max_per_keyword = self.max_articles_per_keyword
-        if max_articles is not None:
-             # Rough distribution - aim for slightly more per keyword initially if overall limit is set
-             current_max_per_keyword = max(self.max_articles_per_keyword, (max_articles // len(keywords)) + 5)
+        current_max_per_keyword = min(
+            self.max_articles_per_keyword,
+            total_articles_target // len(keywords) if max_articles else self.max_articles_per_keyword
+        )
         
         try:
             for keyword in keywords:
@@ -110,22 +110,22 @@ class GoogleNewsScraper:
 
                 print(f'\nSearching for keyword: "{keyword}"')
                 articles_found_for_keyword = 0
+                page = 0
+                
+                while articles_found_for_keyword < current_max_per_keyword and articles_collected_total < total_articles_target:
+                    # Construct search parameters for this page
+                    params = {
+                        'q': keyword,
+                        'tbm': 'nws',
+                        'hl': self.language,
+                        'gl': self.location,
+                        'tbs': f'cdr:1,cd_min:{f_start_date},cd_max:{f_end_date}',
+                        'start': page * 10,  # Google News typically shows 10 results per page
+                        'num': 10
+                    }
 
-                # Construct search parameters
-                params = {
-                    'q': keyword,
-                    'tbm': 'nws',  # Specify News search
-                    'hl': self.language,
-                    'gl': self.location,
-                }
-
-                html_content = None
-                delay = self.initial_delay
-
-                # Fetching loop
-                for retry in range(self.max_retries):
                     try:
-                        print(f'Fetching page for keyword: "{keyword}" (Attempt {retry + 1}/{self.max_retries})')
+                        print(f'Fetching page {page + 1} for keyword "{keyword}" ({articles_found_for_keyword}/{current_max_per_keyword} articles found)')
                         response = requests.get(
                             self.search_url_base,
                             params=params,
@@ -140,115 +140,98 @@ class GoogleNewsScraper:
                                 break
                             response.raise_for_status()
 
-                        html_content = response.text
                         print("HTML fetched successfully.")
-                        break
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        articles = soup.select('div.SoaBEf')
+                        
+                        if not articles:
+                            print("No more articles found on this page.")
+                            break
+
+                        print(f"Found {len(articles)} articles on page.")
+                        articles_processed = 0
+
+                        for article in articles:
+                            if articles_found_for_keyword >= current_max_per_keyword:
+                                print(f"Reached target of {current_max_per_keyword} articles for this keyword.")
+                                break
+                            if articles_collected_total >= total_articles_target:
+                                print("Reached overall article limit.")
+                                break
+
+                            try:
+                                title_element = article.select_one('div.n0jPhd.ynAwRc.MBeuO.nDgy9d')
+                                if not title_element:
+                                    continue
+
+                                title = title_element.get_text(strip=True)
+                                source_element = article.select_one('div.MgUUmf.NUnG9d')
+                                source = source_element.get_text(strip=True) if source_element else "Unknown Source"
+                                snippet_element = article.select_one('div.GI74Re.nDgy9d')
+                                snippet = snippet_element.get_text(strip=True) if snippet_element else ""
+                                link_element = article.select_one('a[href]')
+                                link = link_element['href'] if link_element else "#"
+                                if link.startswith('/url?'):
+                                    link = f"https://www.google.com{link}"
+
+                                spans = article.find_all('span', class_='')
+                                pub_time_str = spans[-1].get_text(strip=True) if spans else "Unknown Time"
+                                pub_time_obj = self._parse_relative_time(pub_time_str)
+                                pub_time = pub_time_obj.isoformat() if pub_time_obj else pub_time_str
+
+                                # Store article data with HTML for thumbnail extraction
+                                article_data = {
+                                    'keywords': keyword,
+                                    'title': title,
+                                    'url': link,
+                                    'snippet': snippet,
+                                    'published_time': pub_time,
+                                    'source': source
+                                }
+
+                                results.append(article_data)
+                                articles_found_for_keyword += 1
+                                articles_collected_total += 1
+                                articles_processed += 1
+                                print(f"Found article {articles_found_for_keyword}/{current_max_per_keyword}: {title[:60]}...")
+
+                            except Exception as e:
+                                print(f"Error processing article: {str(e)}")
+                                continue
+
+                        print(f'Found {articles_processed} articles for keyword "{keyword}" on page {page + 1}')
+                        
+                        if articles_processed < params['num']:
+                            print("No more results available.")
+                            break
+                            
+                        page += 1
+                        time.sleep(self.initial_delay)
 
                     except requests.exceptions.RequestException as e:
                         print(f'Request failed: {str(e)}')
-                        if retry == self.max_retries - 1:
+                        if page >= self.max_retries:
                             print(f'Failed to fetch page after {self.max_retries} attempts.')
-                            continue  # Skip to next keyword
-                        delay *= 2
-                        print(f'Retrying in {delay} seconds...')
-                        time.sleep(delay)
+                            break
+                        time.sleep(self.initial_delay * (2 ** page))
+                        continue
                     except Exception as e:
                         print(f'Unexpected error: {str(e)}')
-                        if retry == self.max_retries - 1:
-                            print(f'Failed after {self.max_retries} attempts.')
-                            continue  # Skip to next keyword
-                        delay *= 2
-                        print(f'Retrying in {delay} seconds...')
-                        time.sleep(delay)
+                        break
 
-                if not html_content:
-                    continue
-
-                # Parse HTML
-                try:
-                    print("Parsing HTML content...")
-                    soup = BeautifulSoup(html_content, 'html.parser')
-
-                    # Updated selectors based on our testing
-                    articles = soup.select('div.SoaBEf')  # Main article container
-                    print(f"Found {len(articles)} articles on page.")
-
-                    for article in articles:
-                        if articles_collected_total >= total_articles_target:
-                            break
-                        if articles_found_for_keyword >= current_max_per_keyword:
-                            break
-
-                        try:
-                            # Extract title (using all classes)
-                            title_element = article.select_one('div.n0jPhd.ynAwRc.MBeuO.nDgy9d')
-                            if not title_element:
-                                continue
-                            title = title_element.get_text(strip=True)
-
-                            # Extract source (using both classes)
-                            source_element = article.select_one('div.MgUUmf.NUnG9d')
-                            source = source_element.get_text(strip=True) if source_element else "Unknown Source"
-
-                            # Extract snippet
-                            snippet_element = article.select_one('div.GI74Re.nDgy9d')
-                            snippet = snippet_element.get_text(strip=True) if snippet_element else ""
-
-                            # Extract link
-                            link_element = article.select_one('a[href]')  # Find first link
-                            link = link_element['href'] if link_element else "#"
-                            # Handle Google's redirect URLs
-                            if link.startswith('/url?'):
-                                link = f"https://www.google.com{link}"
-
-                            # Extract time (last span without class)
-                            spans = article.find_all('span', class_='')
-                            pub_time_str = spans[-1].get_text(strip=True) if spans else "Unknown Time"
-                            # Try to parse the time
-                            pub_time_obj = self._parse_relative_time(pub_time_str)
-                            pub_time = pub_time_obj.isoformat() if pub_time_obj else pub_time_str
-
-                            # Store the article data
-                            article_data = {
-                                'keywords': keyword,
-                                'title': title,
-                                'url': link,
-                                'snippet': snippet,
-                                'published_time': pub_time,
-                                'source': source
-                            }
-
-                            results.append(article_data)
-                            articles_found_for_keyword += 1
-                            articles_collected_total += 1
-                            print(f"Found article {articles_found_for_keyword}: {title[:60]}...")
-
-                        except Exception as e:
-                            print(f"Error processing article: {str(e)}")
-                            continue
-
-                    print(f'Found {articles_found_for_keyword} articles for keyword "{keyword}"')
-
-                except Exception as e:
-                    print(f"Error parsing HTML for keyword '{keyword}': {e}")
-                    continue
-
-                # Add delay between keywords
-                if keyword != keywords[-1]:
+                if keyword != keywords[-1] and articles_collected_total < total_articles_target:
                     time.sleep(self.initial_delay)
 
         except Exception as e:
             print(f"Error in get_news: {str(e)}")
-            return pd.DataFrame()  # Return empty DataFrame on any error
+            return pd.DataFrame()
 
         print(f"\n--- HTML Scraping Finished ---")
         print(f"Collected a total of {len(results)} articles.")
 
-        # Create DataFrame
-        df = pd.DataFrame(results) if results else pd.DataFrame(
+        return pd.DataFrame(results) if results else pd.DataFrame(
             columns=['keywords', 'title', 'url', 'snippet', 'published_time', 'source']
         )
-        return df
     
     # _clean_html is likely not needed anymore as we use .get_text(strip=True) from BeautifulSoup
     # def _clean_html(self, text): ...

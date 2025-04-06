@@ -8,7 +8,7 @@ def main():
     try:
         # Initialize the scraper
         scraper = GoogleNewsScraper(
-            max_articles_per_keyword=25,
+            max_articles_per_keyword=10,
             location='US',
             language='en'
         )
@@ -28,7 +28,8 @@ def main():
         
         # Get news articles
         df = scraper.get_news(keywords, start_date, end_date, max_articles=100)
-        
+        df.to_excel('Output/news_articles.xlsx', index=False)
+
         if df.empty:
             print("No articles were found. Please check your search parameters.")
             return

@@ -30,16 +30,16 @@ class ContentAnalyzerSimple:
         
         self.keywords = {
             'AI Development': [
-                'artificial intelligence research', 'machine learning advances',
-                'AI breakthroughs', 'neural networks', 'deep learning'
+                'artificial intelligence research', 'image generation', 'AI impact'
+                'AI breakthroughs', 'neural networks', 'large language models'
             ],
             'Fintech': [
                 'digital banking', 'blockchain finance', 'payment technology',
-                'financial technology', 'cryptocurrency'
+                'financial technology', 'cryptocurrency', 'AI Regulation'
             ],
             'GenAI Usage': [
                 'generative AI', 'AI applications', 'AI implementation',
-                'AI automation', 'AI tools'
+                'AI automation', 'AI tools', 'AI agents'
             ]
         }
         # Define the prompt template once
@@ -197,7 +197,7 @@ class ContentAnalyzerSimple:
                 break
 
         # Combine scores with weights
-        trending_score = (0.5 * time_score) + (0.3 * frequency_score) + (0.2 * source_score)
+        trending_score = (0.2 * time_score) + (0.3 * frequency_score) + (0.5 * source_score)
         return trending_score
 
     def generate_topic_summary(self, top_articles: List[Dict]) -> Dict:
