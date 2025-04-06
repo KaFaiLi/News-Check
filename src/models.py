@@ -53,7 +53,6 @@ class BriefSummary(BaseModel):
     title: str
     summary: str
     significance: str
-    image_url: Optional[str] = None
 
     model_config = {
         "json_schema_extra": {

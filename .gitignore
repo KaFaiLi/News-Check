@@ -41,16 +41,21 @@ Output/
 *.xlsx
 *.csv
 *.log
-models.7z
+config_local.py
+*_local.py
 .env.local
 .env.*.local
 
 # OS specific
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
 desktop.ini
 
-# Testing
+# Testing and coverage
 .coverage
 htmlcov/
 .pytest_cache/
@@ -77,4 +82,10 @@ var/
 wheels/
 *.egg-info/
 .installed.cfg
-*.egg 
+*.egg
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~ 

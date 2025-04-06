@@ -2,118 +2,181 @@
 
 import os
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 import requests
 from docx import Document
 from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_PARAGRAPH_ALIGNMENT
 from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
-from config import OPENAI_API_KEY, OPENAI_API_BASE, OUTPUT_DIR
-from models import ArticleAnalysis, TrendAnalysis, BriefSummary, DetailedReport
+from src.config import OPENAI_API_KEY, OPENAI_API_BASE, OUTPUT_DIR
+from src.models import ArticleAnalysis, TrendAnalysis, BriefSummary, DetailedReport
 
 class DocumentGenerator:
-    def __init__(self, output_dir='Output'):
+    def __init__(self, output_dir=OUTPUT_DIR, llm_instance: Optional[ChatOpenAI] = None):
         self.output_dir = output_dir
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        self.llm = llm_instance
+        os.makedirs(self.output_dir, exist_ok=True)
+        self.summary_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert news analyst. Synthesize the key themes and most significant developments from the provided list of recent news article titles and their insights."),
+            ("user", "Please provide a concise overall summary (3-4 sentences) based on the following articles:\n\n{article_summaries}\n\nOverall Summary:")
+        ])
+        if self.llm:
+            self.summary_chain = self.summary_prompt | self.llm
+        else:
+             self.summary_chain = None
 
-    def generate_brief_summary(self, articles):
-        """Generate a brief summary document with top 3 articles"""
-        doc = Document()
-        
-        # Add title
-        title = doc.add_heading('News Summary Report', 0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Add date
-        date_paragraph = doc.add_paragraph()
-        date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        date_paragraph.add_run(f'Generated on {datetime.now().strftime("%B %d, %Y")}')
-        
-        doc.add_paragraph('\n')
-        
-        # Add top articles
-        doc.add_heading('Top Stories', level=1)
-        for idx, article in enumerate(articles[:3], 1):
-            # Add article title
-            doc.add_heading(f'{idx}. {article["article"]["title"]}', level=2)
-            
-            # Add metadata
-            meta = doc.add_paragraph(style='Intense Quote')
-            meta.add_run(f'Source: {article["article"].get("source", "Unknown")}\n')
-            meta.add_run(f'Date: {article["article"].get("published_time", "Unknown")}\n')
-            meta.add_run(f'Category: {max(article["analysis"]["scores"].items(), key=lambda x: x[1])[0]}')
-            
-            # Add description and insights
-            doc.add_paragraph(article["article"].get("description", "No description available"))
-            if article["analysis"].get("insights"):
-                doc.add_paragraph(article["analysis"]["insights"], style='Quote')
-            
-            doc.add_paragraph('\n')
-        
-        # Save document
-        output_path = os.path.join(self.output_dir, 'brief_summary.docx')
-        doc.save(output_path)
-        return output_path
+    def _set_doc_margins(self, document):
+        sections = document.sections
+        for section in sections:
+            section.top_margin = Inches(1)
+            section.bottom_margin = Inches(1)
+            section.left_margin = Inches(1)
+            section.right_margin = Inches(1)
 
-    def generate_detailed_report(self, articles):
-        """Generate a detailed report with top 10 articles and analysis"""
-        doc = Document()
-        
-        # Add title
-        title = doc.add_heading('Detailed News Analysis Report', 0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Add date
-        date_paragraph = doc.add_paragraph()
-        date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        date_paragraph.add_run(f'Generated on {datetime.now().strftime("%B %d, %Y")}')
-        
-        doc.add_paragraph('\n')
-        
-        # Add category distribution
-        doc.add_heading('Category Distribution', level=1)
-        categories = {'AI Development': 0, 'Fintech': 0, 'GenAI Usage': 0}
-        for article in articles:
-            category = max(article["analysis"]["scores"].items(), key=lambda x: x[1])[0]
-            categories[category] += 1
-        
-        for category, count in categories.items():
-            doc.add_paragraph(f'{category}: {count} articles')
-        
-        doc.add_paragraph('\n')
-        
-        # Add detailed article analysis
-        doc.add_heading('Detailed Article Analysis', level=1)
-        for idx, article in enumerate(articles[:10], 1):
-            # Add article title
-            doc.add_heading(f'{idx}. {article["article"]["title"]}', level=2)
-            
-            # Add metadata
-            meta = doc.add_paragraph(style='Intense Quote')
-            meta.add_run(f'Source: {article["article"].get("source", "Unknown")}\n')
-            meta.add_run(f'Date: {article["article"].get("published_time", "Unknown")}\n')
-            
-            # Add category scores
-            doc.add_heading('Category Relevance', level=3)
-            for category, score in article["analysis"]["scores"].items():
-                doc.add_paragraph(f'{category}: {score:.2%}')
-            
-            # Add description and insights
-            doc.add_heading('Content', level=3)
-            doc.add_paragraph(article["article"].get("description", "No description available"))
-            
-            if article["analysis"].get("insights"):
-                doc.add_heading('Analysis', level=3)
-                doc.add_paragraph(article["analysis"]["insights"], style='Quote')
-            
-            doc.add_paragraph('\n')
-        
-        # Save document
-        output_path = os.path.join(self.output_dir, 'detailed_report.docx')
-        doc.save(output_path)
-        return output_path 
+    def _add_styled_paragraph(self, document, text, size=11, bold=False, alignment=WD_PARAGRAPH_ALIGNMENT.LEFT):
+        paragraph = document.add_paragraph()
+        paragraph.alignment = alignment
+        run = paragraph.add_run(text)
+        run.font.name = 'Calibri'
+        run.font.size = Pt(size)
+        run.bold = bold
+        paragraph.paragraph_format.space_after = Pt(6)
+        return paragraph
+
+    def _generate_overall_summary(self, top_articles: List[Dict]) -> str:
+        """Generates an overall summary using the LLM based on top articles."""
+        if not self.llm or not self.summary_chain:
+            print("LLM instance not available for generating overall summary.")
+            return "Overall summary could not be generated (LLM not configured)."
+
+        # Prepare the input for the LLM
+        summary_input = []
+        for item in top_articles:
+            title = item.get('article', {}).get('title', 'No Title')
+            insight = item.get('analysis', {}).get('insights', 'N/A')
+            # Ensure insight is a string, handling None or potential non-string types
+            insight_str = str(insight) if insight else 'N/A'
+            summary_input.append(f"Title: {title}\nInsight: {insight_str}\n---")
+
+        if not summary_input:
+            return "No articles available to generate a summary."
+
+        formatted_input = "\n".join(summary_input)
+
+        try:
+            print("Generating overall summary with LLM...")
+            response = self.summary_chain.invoke({"article_summaries": formatted_input})
+            print("Overall summary generated.")
+            return str(response.content) # Extract content from the response object
+        except Exception as e:
+            print(f"Error generating overall summary with LLM: {e}")
+            return f"Overall summary could not be generated due to an error: {e}"
+
+    def generate_brief_summary(self, top_articles: List[Dict]):
+        """Generates a brief Word document summary (e.g., top 3 articles)."""
+        document = Document()
+        self._set_doc_margins(document)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"brief_news_summary_{timestamp}.docx"
+        filepath = os.path.join(self.output_dir, filename)
+
+        self._add_styled_paragraph(document, "Brief News Summary", size=16, bold=True, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
+        self._add_styled_paragraph(document, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", size=10, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
+        document.add_paragraph() # Add spacing
+
+        # Include only the top 3 articles for the brief summary
+        for i, item in enumerate(top_articles[:3], 1):
+            article = item.get('article', {})
+            analysis = item.get('analysis', {})
+            title = article.get('title', 'No Title Provided')
+            source = article.get('source', 'Unknown Source')
+            pub_time_str = article.get('published_time', 'Unknown Time')
+            # Safely parse date
+            try:
+                 pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
+            except:
+                 pub_time = pub_time_str # Keep original if parsing fails
+
+            url = article.get('url', '#')
+            # Ensure insights are handled correctly (might be None or require .content)
+            insights = analysis.get('insights', 'No analysis available.')
+            insights_str = str(insights) if insights else 'No analysis available.'
+
+
+            self._add_styled_paragraph(document, f"{i}. {title}", size=12, bold=True)
+            self._add_styled_paragraph(document, f"   Source: {source} | Published: {pub_time}", size=10)
+            self._add_styled_paragraph(document, f"   Analysis: {insights_str}", size=11)
+            p = self._add_styled_paragraph(document, f"   Link: ", size=10)
+            # Simple link adding (no hyperlink capability in basic python-docx text)
+            p.add_run(url).font.size = Pt(10)
+            document.add_paragraph() # Add spacing between articles
+
+        document.save(filepath)
+        return filepath
+
+    def generate_detailed_report(self, top_articles: List[Dict]):
+        """Generates a detailed Word document report including an overall summary."""
+        document = Document()
+        self._set_doc_margins(document)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"detailed_news_report_{timestamp}.docx"
+        filepath = os.path.join(self.output_dir, filename)
+
+        self._add_styled_paragraph(document, "Detailed News Report", size=16, bold=True, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
+        self._add_styled_paragraph(document, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", size=10, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
+        document.add_paragraph() # Add spacing
+
+        # --- Add Overall Summary and Fixed Intro Lines ---
+        overall_summary_text = self._generate_overall_summary(top_articles)
+        self._add_styled_paragraph(document, "Overall Summary", size=12, bold=True)
+        self._add_styled_paragraph(document, overall_summary_text, size=11) # Add the LLM summary
+        document.add_paragraph() # Spacing
+
+        # Add the fixed introductory lines
+        self._add_styled_paragraph(document, "The following are the top news items for review.", size=11)
+        self._add_styled_paragraph(document, "For more detailed analysis of each article, please refer to the individual insights provided below or the source links.", size=11)
+        document.add_paragraph() # Spacing before the list
+        # --- End Overall Summary Section ---
+
+
+        self._add_styled_paragraph(document, "Top News Details", size=14, bold=True) # Heading for the list
+
+
+        for i, item in enumerate(top_articles, 1):
+            article = item.get('article', {})
+            analysis = item.get('analysis', {})
+            scores = analysis.get('scores', {})
+            # Determine primary category
+            primary_category = max(scores, key=scores.get) if scores else "N/A"
+            overall_score_pct = analysis.get('overall_score', 0) * 100
+
+            title = article.get('title', 'No Title Provided')
+            source = article.get('source', 'Unknown Source')
+            pub_time_str = article.get('published_time', 'Unknown Time')
+            # Safely parse date
+            try:
+                 pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
+            except:
+                 pub_time = pub_time_str
+
+            url = article.get('url', '#')
+            # Ensure insights are handled correctly
+            insights = analysis.get('insights', 'No analysis available.')
+            insights_str = str(insights) if insights else 'No analysis available.'
+
+
+            self._add_styled_paragraph(document, f"{i}. {title}", size=12, bold=True)
+            self._add_styled_paragraph(document, f"   Source: {source} | Published: {pub_time}", size=10)
+            self._add_styled_paragraph(document, f"   Category: {primary_category} | Relevance Score: {overall_score_pct:.1f}%", size=10)
+            self._add_styled_paragraph(document, f"   Analysis: {insights_str}", size=11)
+            p = self._add_styled_paragraph(document, f"   Link: ", size=10)
+            # Simple link adding
+            p.add_run(url).font.size = Pt(10)
+            document.add_paragraph()
+
+        document.save(filepath)
+        return filepath 
