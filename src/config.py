@@ -11,7 +11,6 @@ LLM_THRESHOLD = 0.1  # Minimum keyword relevance score to trigger LLM analysis
 # RSS Feed settings
 MAX_RETRIES = 5  # Maximum number of retry attempts for failed requests
 INITIAL_DELAY = 1  # Initial delay between requests in seconds
-MAX_ARTICLES = 50  # Maximum number of articles to fetch per keyword
 
 # Request settings
 REQUEST_TIMEOUT = 30  # Request timeout in seconds

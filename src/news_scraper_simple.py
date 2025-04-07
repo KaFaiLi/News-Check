@@ -13,11 +13,11 @@ from bs4 import BeautifulSoup # Import BeautifulSoup
 
 from src.content_analyzer_simple import ContentAnalyzerSimple
 from src.document_generator import DocumentGenerator
-from src.config import MAX_RETRIES, INITIAL_DELAY, MAX_ARTICLES, REQUEST_TIMEOUT, USER_AGENT, OUTPUT_DIR
+from src.config import MAX_RETRIES, INITIAL_DELAY, REQUEST_TIMEOUT, USER_AGENT, OUTPUT_DIR
 
 # Rename class to reflect scraping method
 class GoogleNewsScraper:
-    def __init__(self, max_articles_per_keyword=MAX_ARTICLES, location='US', language='en'):
+    def __init__(self, max_articles_per_keyword, location='US', language='en'):
         self.headers = {
             'User-Agent': USER_AGENT,
             # Might need more headers to mimic a real browser
@@ -31,6 +31,8 @@ class GoogleNewsScraper:
         self.max_articles_per_keyword = max_articles_per_keyword # Limit per keyword
         self.location = location
         self.language = language
+        self.max_results_per_request = 100  # Maximum allowed by Google
+        self.default_results_per_request = 10  # Default for smaller requests
 
         print("--- INFO ---")
         print("Using direct HTML scraping via google.com/search?tbm=nws.")
@@ -81,6 +83,15 @@ class GoogleNewsScraper:
 
         return None # Return None if format is unrecognized
 
+    def _get_results_per_request(self, target_articles: int) -> int:
+        """Determine optimal number of results per request based on target articles."""
+        if target_articles <= 10:
+            return 10  # Use minimum for small requests
+        elif target_articles <= 50:
+            return 50  # Medium batch size
+        else:
+            return 100  # Maximum for large requests (Google's limit)
+
     # Overhauled get_news method
     def get_news(self, keywords: List[str], start_date: str, end_date: str, max_articles: Optional[int] = None) -> pd.DataFrame:
         """Get news articles by scraping Google Search (News tab) HTML results."""
@@ -96,12 +107,6 @@ class GoogleNewsScraper:
         total_articles_target = max_articles if max_articles is not None else float('inf')
         articles_collected_total = 0
         
-        # Update max articles per keyword if overall limit is lower than default per keyword
-        current_max_per_keyword = min(
-            self.max_articles_per_keyword,
-            total_articles_target // len(keywords) if max_articles else self.max_articles_per_keyword
-        )
-        
         try:
             for keyword in keywords:
                 if articles_collected_total >= total_articles_target:
@@ -112,7 +117,16 @@ class GoogleNewsScraper:
                 articles_found_for_keyword = 0
                 page = 0
                 
-                while articles_found_for_keyword < current_max_per_keyword and articles_collected_total < total_articles_target:
+                # Calculate remaining articles needed for this keyword
+                remaining_articles = min(
+                    self.max_articles_per_keyword,
+                    total_articles_target - articles_collected_total
+                )
+                
+                while articles_found_for_keyword < remaining_articles:
+                    # Determine results per request for this page
+                    results_per_request = self._get_results_per_request(remaining_articles - articles_found_for_keyword)
+                    
                     # Construct search parameters for this page
                     params = {
                         'q': keyword,
@@ -120,12 +134,12 @@ class GoogleNewsScraper:
                         'hl': self.language,
                         'gl': self.location,
                         'tbs': f'cdr:1,cd_min:{f_start_date},cd_max:{f_end_date}',
-                        'start': page * 10,  # Google News typically shows 10 results per page
-                        'num': 10
+                        'start': page * 100,  # Google uses 100 as the base unit for pagination
+                        'num': results_per_request
                     }
 
                     try:
-                        print(f'Fetching page {page + 1} for keyword "{keyword}" ({articles_found_for_keyword}/{current_max_per_keyword} articles found)')
+                        print(f'Fetching page {page + 1} for keyword "{keyword}" ({articles_found_for_keyword}/{remaining_articles} articles found)')
                         response = requests.get(
                             self.search_url_base,
                             params=params,
@@ -152,8 +166,8 @@ class GoogleNewsScraper:
                         articles_processed = 0
 
                         for article in articles:
-                            if articles_found_for_keyword >= current_max_per_keyword:
-                                print(f"Reached target of {current_max_per_keyword} articles for this keyword.")
+                            if articles_found_for_keyword >= remaining_articles:
+                                print(f"Reached target of {remaining_articles} articles for this keyword.")
                                 break
                             if articles_collected_total >= total_articles_target:
                                 print("Reached overall article limit.")
@@ -193,7 +207,7 @@ class GoogleNewsScraper:
                                 articles_found_for_keyword += 1
                                 articles_collected_total += 1
                                 articles_processed += 1
-                                print(f"Found article {articles_found_for_keyword}/{current_max_per_keyword}: {title[:60]}...")
+                                print(f"Found article {articles_collected_total}/{total_articles_target}: {title[:60]}...")
 
                             except Exception as e:
                                 print(f"Error processing article: {str(e)}")
@@ -201,7 +215,7 @@ class GoogleNewsScraper:
 
                         print(f'Found {articles_processed} articles for keyword "{keyword}" on page {page + 1}')
                         
-                        if articles_processed < params['num']:
+                        if articles_processed < results_per_request:
                             print("No more results available.")
                             break
                             
@@ -232,119 +246,3 @@ class GoogleNewsScraper:
         return pd.DataFrame(results) if results else pd.DataFrame(
             columns=['keywords', 'title', 'url', 'snippet', 'published_time', 'source']
         )
-    
-    # _clean_html is likely not needed anymore as we use .get_text(strip=True) from BeautifulSoup
-    # def _clean_html(self, text): ...
-
-
-# --- Main function remains largely the same, but uses GoogleNewsScraper ---
-def main():
-    try:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        
-        # Initialize the updated scraper class
-        scraper_instance = GoogleNewsScraper(
-            max_articles_per_keyword=25, # Limit per keyword
-            location='US',
-            language='en'
-        )
-
-        keywords = [
-            'artificial intelligence research', 'machine learning breakthrough', 'neural network development',
-            'fintech innovation', 'digital banking technology', 'blockchain finance',
-            'generative AI', 'ChatGPT enterprise', 'AI content creation'
-        ]
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        # Go back 7 days for example
-        start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        
-        print(f"\nFetching news via HTML scraping (google.com/search) from {start_date} to {end_date}")
-        
-        # Get news using the scraper, setting an overall limit
-        # Set a reasonable overall limit, e.g., 100
-        df = scraper_instance.get_news(keywords, start_date, end_date, max_articles=100)
-        
-        if df.empty:
-            print("No articles were found via HTML scraping. Check selectors, network, date range, or try RSS.")
-            return
-        
-        # --- Save raw scraped data to Excel ---
-        try:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            excel_filename = f"scraped_news_raw_{timestamp}.xlsx"
-            excel_filepath = os.path.join(OUTPUT_DIR, excel_filename)
-            print(f"\nSaving raw scraped data to Excel: {excel_filepath}")
-            df.to_excel(excel_filepath, index=False, engine='openpyxl')
-            print(f"Successfully saved raw data to {excel_filepath}")
-        except Exception as e:
-            print(f"Warning: Could not save raw data to Excel. Error: {e}")
-        # --- End Excel Saving ---
-
-        print("\nInitializing content analyzer...")
-        analyzer = ContentAnalyzerSimple() # Analyzer logic remains the same
-        
-        articles = df.to_dict('records')
-        
-        print("\nRemoving duplicate articles...")
-        unique_articles = analyzer.remove_duplicates(articles) # Duplicate removal remains the same
-        print(f'Found {len(unique_articles)} unique articles after removing duplicates')
-        
-        if not unique_articles:
-             print("No unique articles left after duplicate removal.")
-             return
-
-        print("\nRanking and analyzing articles...")
-        # Limit LLM analysis to top N (e.g., 20) as configured before
-        top_articles = analyzer.rank_articles(unique_articles, top_n=20)
-
-        if not top_articles:
-             print("\nNo articles ranked high enough to generate reports.")
-             return
-
-        topic_summary = analyzer.generate_topic_summary(top_articles)
-        
-        print("\nInitializing document generator...")
-        # Pass LLM instance to generator as before
-        doc_generator = DocumentGenerator(llm_instance=analyzer.llm)
-        
-        print("\nGenerating Word documents...")
-        brief_doc_path = doc_generator.generate_brief_summary(top_articles)
-        print(f"Generated brief summary document: {brief_doc_path}")
-        detailed_doc_path = doc_generator.generate_detailed_report(top_articles)
-        print(f"Generated detailed report: {detailed_doc_path}")
-        
-        # Display category breakdown
-        print(f'\nCategory Breakdown for Top {len(top_articles)} Articles:')
-        print(f'  AI Development: {topic_summary["ai_development_count"]} articles')
-        print(f'  Fintech: {topic_summary["fintech_count"]} articles')
-        print(f'  GenAI Usage: {topic_summary["genai_usage_count"]} articles')
-        print(f'  Other: {topic_summary["other_count"]} articles')
-        
-        print("\nDocuments have been generated successfully!")
-        
-    except Exception as e:
-        print(f"An error occurred in main: {str(e)}")
-        import traceback
-        print("Traceback:")
-        print(traceback.format_exc()) # Print full traceback for easier debugging
-        # raise # Optionally re-raise
-
-if __name__ == "__main__":
-    # Ensure dependencies are checked/installed
-    try:
-        import bs4
-    except ImportError:
-        print("Note: 'beautifulsoup4' library not found. Please install it ('pip install beautifulsoup4').")
-        # Consider adding auto-install or exiting
-    try:
-        import openpyxl
-    except ImportError:
-        print("Note: 'openpyxl' library not found. Attempting install...")
-        import subprocess, sys
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
-            print("'openpyxl' installed successfully.")
-        except Exception as install_error:
-            print(f"Failed to install 'openpyxl'. Please install manually. Error: {install_error}")
-
-    main() 
