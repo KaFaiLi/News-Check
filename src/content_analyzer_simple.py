@@ -167,7 +167,6 @@ class ContentAnalyzerSimple:
                     browser = p.chromium.launch(
                         channel="msedge",
                         headless=False, # Disable headless mode
-                        # args=['--headless=new']  # Remove headless argument
                     )
                     
                     # Create a new context with specific user agent
@@ -206,15 +205,21 @@ class ContentAnalyzerSimple:
                         else:
                             raise PlaywrightError(f"Failed to load page {url} with status {status}")
 
-                    # Try to wait for network idle, but fall back to domcontentloaded if it times out
+                    # Wait for content to load
                     try:
-                        page.wait_for_load_state('networkidle', timeout=15000)  # Shorter timeout
+                        # Wait for main content to be visible
+                        page.wait_for_selector('article, main, .article-content, .post-content, .entry-content', timeout=15000)
                     except PlaywrightTimeoutError:
-                        print(f"Network idle timeout, using domcontentloaded state for {url}")
-                        page.wait_for_load_state('domcontentloaded', timeout=15000)
-                    
+                        print("Main content selector not found, continuing with full page content")
+
+                    # Wait for network idle
+                    try:
+                        page.wait_for_load_state('networkidle', timeout=15000)
+                    except PlaywrightTimeoutError:
+                        print("Network idle timeout, using current state")
+
                     # Wait an additional 5 seconds to ensure dynamic content is loaded
-                    print(f"Waiting 5 seconds for dynamic content on {url}")
+                    print("Waiting for dynamic content to load...")
                     time.sleep(5)
                     
                     # Get the full page HTML content
@@ -266,7 +271,16 @@ class ContentAnalyzerSimple:
         # Convert HTML to markdown first
         try:
             print("Converting HTML to markdown...")
-            markdown_content = html2text.html2text(html_content)
+            # Configure html2text for better markdown conversion
+            self.h2t.ignore_links = False
+            self.h2t.ignore_images = True
+            self.h2t.ignore_tables = False
+            self.h2t.body_width = 0
+            self.h2t.unicode_snob = True
+            self.h2t.escape_all = True
+            
+            # Convert HTML to markdown
+            raw_markdown = self.h2t.handle(html_content)
             
             # Use LLM to extract the article content from markdown
             print("Using LLM to extract article content...")
@@ -274,20 +288,39 @@ class ContentAnalyzerSimple:
             Focus on the actual article content and remove any navigation, ads, or other non-article elements.
             Return only the extracted content in markdown format:
 
-            {markdown_content[:4000]}  # Limit to first 4000 chars to avoid token limits
+            {raw_markdown[:4000]}  # Limit to first 4000 chars to avoid token limits
             """
             
-            extracted_content = self.llm.invoke(llm_prompt)
-            
-            if not extracted_content or len(extracted_content.strip()) < 100:
-                print("LLM extraction failed or returned insufficient content")
-                return None
+            try:
+                llm_response = self.llm.invoke(llm_prompt)
+                extracted_content = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+                print(f"Extracted content length: {len(extracted_content)}")
                 
-            return {
-                'html': html_content,
-                'markdown': extracted_content,
-                'url': url
-            }
+                if not extracted_content or len(extracted_content.strip()) < 100:
+                    print("LLM extraction failed or returned insufficient content")
+                    return None
+                    
+                # Save both raw and extracted content
+                content_dict = {
+                    'html': html_content,
+                    'raw_markdown': raw_markdown,
+                    'extracted_markdown': extracted_content,
+                    'url': url
+                }
+                self._save_article_content(article_id, content_dict)
+                    
+                return content_dict
+                
+            except Exception as e:
+                print(f"Error processing content: {str(e)}")
+                error_info = {
+                    'url': url,
+                    'error_message': str(e),
+                    'timestamp': datetime.now().isoformat(),
+                    'fetch_method': 'edge'
+                }
+                self._save_error_info(article_id, error_info)
+                return None
             
         except Exception as e:
             print(f"Error processing content: {str(e)}")
@@ -327,13 +360,13 @@ class ContentAnalyzerSimple:
             
             # Save markdown content
             with open(os.path.join(article_dir, 'content.md'), 'w', encoding='utf-8') as f:
-                f.write(content['markdown'])
+                f.write(content['extracted_markdown'])
             
             # Save metadata
             metadata = {
                 'url': content['url'],
                 'fetch_time': datetime.now().isoformat(),
-                'content_length': len(content['markdown'])
+                'content_length': len(content['extracted_markdown'])
             }
             with open(os.path.join(article_dir, 'metadata.json'), 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, indent=2)
@@ -378,13 +411,19 @@ class ContentAnalyzerSimple:
                     print("Could not fetch article content, using snippet only")
 
             # Prepare the prompt with available content
-            content = article_content if article_content else article_data.get('snippet', 'No Description')
+            content = article_content['extracted_markdown'] if article_content else article_data.get('snippet', 'No Description')
             
             insights_result = self.llm_chain.invoke({
                 "title": article_data.get('title', 'No Title'),
                 "description": content
             })
-            return str(insights_result.content)
+            
+            # Handle different response types
+            if hasattr(insights_result, 'content'):
+                return str(insights_result.content)
+            else:
+                return str(insights_result)
+                
         except Exception as e:
             print(f"Error getting LLM insights for article '{article_data.get('title', 'Unknown')}': {e}")
             return None
@@ -447,7 +486,7 @@ class ContentAnalyzerSimple:
             print(f"Fetching content from: {article_url}")
             content_result = self.fetch_article_content(article_url, article_id)
             
-            if content_result and 'markdown' in content_result and len(content_result['markdown'].strip()) > 100:
+            if content_result and 'extracted_markdown' in content_result and len(content_result['extracted_markdown'].strip()) > 100:
                 # Content fetch successful
                 print("Content fetched successfully")
                 item['article']['fetched_content'] = content_result
@@ -457,7 +496,7 @@ class ContentAnalyzerSimple:
                     print(f"Getting LLM insights...")
                     insights = self.get_llm_insights({
                         'title': article.get('title', ''),
-                        'description': content_result['markdown']
+                        'description': content_result['extracted_markdown']
                     })
                     item['analysis']['insights'] = insights
                     if insights:
