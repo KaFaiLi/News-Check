@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from src.models import ArticleAnalysis, TrendAnalysis
 from src.config import OPENAI_API_KEY, OPENAI_API_BASE, USE_LLM, LLM_THRESHOLD, OUTPUT_DIR
-import requests
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 from bs4 import BeautifulSoup
 import html2text
 import time
@@ -41,13 +41,6 @@ class ContentAnalyzerSimple:
         self.h2t.ignore_images = True
         self.h2t.ignore_tables = False
         self.h2t.body_width = 0  # Disable text wrapping
-        
-        # Add request headers for fetching article content
-        self.request_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-        }
         
         # Paywall detection patterns
         self.paywall_patterns = [
@@ -128,30 +121,7 @@ class ContentAnalyzerSimple:
         return False
 
     def _handle_paywalled_content(self, url: str, soup: BeautifulSoup) -> Optional[str]:
-        """Attempt to handle paywalled content using various strategies."""
-        domain = url.split('/')[2]
-        strategy = self.paywall_domains.get(domain, 'alternative')
-        
-        if strategy == 'archive':
-            # Try to get archived version
-            try:
-                archive_url = f"https://web.archive.org/web/*/{url}"
-                response = requests.get(archive_url, headers=self.request_headers, timeout=30)
-                if response.status_code == 200:
-                    archive_soup = BeautifulSoup(response.text, 'html.parser')
-                    # Try to find the most recent snapshot
-                    snapshots = archive_soup.find_all('div', class_='captures')
-                    if snapshots:
-                        latest_snapshot = snapshots[0].find('a')
-                        if latest_snapshot:
-                            archive_url = latest_snapshot['href']
-                            response = requests.get(archive_url, headers=self.request_headers, timeout=30)
-                            if response.status_code == 200:
-                                return response.text
-            except Exception as e:
-                print(f"Archive strategy failed: {str(e)}")
-        
-        # Try to extract preview content
+        """Attempt to handle paywalled content by extracting preview content."""
         try:
             # Look for preview or teaser content
             preview_selectors = [
@@ -160,7 +130,9 @@ class ContentAnalyzerSimple:
                 '.article-summary',
                 '.preview-content',
                 '[class*="preview"]',
-                '[class*="teaser"]'
+                '[class*="teaser"]',
+                '.article-excerpt',
+                '.summary'
             ]
             
             for selector in preview_selectors:
@@ -181,159 +153,166 @@ class ContentAnalyzerSimple:
         return None
 
     def fetch_article_content(self, url: str, article_id: str) -> Optional[Dict[str, str]]:
-        """Fetch article content from URL and convert to markdown with improved error handling."""
+        """Fetch article content from URL using Playwright Edge with new headless mode."""
         max_retries = 3
         retry_delay = 2  # seconds
         last_error = None
-        
+        html_content = None # Initialize html_content
+
         for attempt in range(max_retries):
+            print(f"Fetching content from: {url} (Attempt {attempt + 1}/{max_retries}) using Edge")
             try:
-                print(f"Fetching content from: {url} (Attempt {attempt + 1}/{max_retries})")
-                
-                # Add timeout and verify SSL
-                response = requests.get(
-                    url, 
-                    headers=self.request_headers, 
-                    timeout=30,
-                    verify=True  # Enable SSL verification
-                )
-                
-                # Check for specific HTTP status codes
-                if response.status_code == 403:
-                    print("Access forbidden (403). Trying with different headers...")
-                    # Try with alternative headers
-                    alt_headers = {
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                with sync_playwright() as p:
+                    # Launch Edge with new headless mode
+                    browser = p.chromium.launch(
+                        channel="msedge",
+                        headless=False, # Disable headless mode
+                        # args=['--headless=new']  # Remove headless argument
+                    )
+                    
+                    # Create a new context with specific user agent
+                    context = browser.new_context(
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'
+                    )
+                    
+                    page = context.new_page()
+                    
+                    # Set extra headers
+                    page.set_extra_http_headers({
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                         'Accept-Language': 'en-US,en;q=0.5',
-                        'Referer': 'https://www.google.com/'
-                    }
-                    response = requests.get(url, headers=alt_headers, timeout=30, verify=True)
-                
-                response.raise_for_status()
-                
-                # Parse HTML
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Check for paywall
-                if self._detect_paywall(soup, url):
-                    print("Paywall detected. Attempting to handle...")
-                    paywall_content = self._handle_paywalled_content(url, soup)
-                    if paywall_content:
-                        print("Successfully extracted content from paywalled article")
-                        soup = BeautifulSoup(paywall_content, 'html.parser')
-                    else:
-                        print("Could not extract content from paywalled article")
-                        return None
-                
-                # Remove unwanted elements
-                for element in soup.find_all(['script', 'style', 'nav', 'footer', 'header', 'iframe']):
-                    element.decompose()
-                
-                # Try to find the main content
-                main_content = None
-                content_selectors = [
-                    'article',  # Common article tag
-                    'main',     # Main content
-                    '.article-content',  # Common class
-                    '.post-content',
-                    '#content',
-                    '.content'
-                ]
-                
-                for selector in content_selectors:
-                    main_content = soup.select_one(selector)
-                    if main_content:
-                        break
-                
-                # If no specific content found, use the whole body
-                if not main_content:
-                    main_content = soup.find('body')
-                    if not main_content:
-                        main_content = soup
-                
-                # Get cleaned HTML
-                cleaned_html = str(main_content)
-                
-                # Convert to markdown
-                markdown_content = self.h2t.handle(cleaned_html)
-                
-                # Clean up the markdown
-                markdown_content = re.sub(r'\n{3,}', '\n\n', markdown_content)  # Remove excessive newlines
-                markdown_content = re.sub(r'\[.*?\]\(.*?\)', '', markdown_content)  # Remove markdown links
-                markdown_content = re.sub(r'#+\s*', '', markdown_content)  # Remove headers
-                markdown_content = markdown_content.strip()
-                
-                # Check if we got meaningful content
-                if len(markdown_content) < 100:  # If content is too short
-                    print("Warning: Retrieved content seems too short. Trying alternative content extraction...")
-                    # Try to get text from all paragraphs
-                    paragraphs = soup.find_all('p')
-                    if paragraphs:
-                        markdown_content = '\n\n'.join(p.get_text(strip=True) for p in paragraphs)
-                
-                # Save both HTML and markdown content
-                content = {
-                    'html': cleaned_html,
-                    'markdown': markdown_content[:5000],  # Limit markdown content length
-                    'url': url,
-                    'fetch_attempts': attempt + 1,
-                    'is_paywalled': self._detect_paywall(soup, url)
-                }
-                
-                # Save to files
-                self._save_article_content(article_id, content)
-                
-                return content
-                
-            except requests.exceptions.SSLError as e:
-                print(f"SSL Error: {str(e)}")
-                last_error = e
-                if attempt < max_retries - 1:
-                    print(f"Retrying with SSL verification disabled...")
+                        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"',
+                        'Sec-Ch-Ua-Mobile': '?0',
+                        'Sec-Ch-Ua-Platform': '"Windows"',
+                        'Upgrade-Insecure-Requests': '1'
+                    })
+
+                    # Navigate to the page
+                    response = page.goto(
+                        url,
+                        timeout=45000,
+                        wait_until='domcontentloaded'
+                    )
+
+                    # Check response status
+                    if not response or not response.ok:
+                        status = response.status if response else 'No response'
+                        print(f"Error: Received status {status} from {url}")
+                        context.close()
+                        browser.close()
+                        if attempt < max_retries - 1:
+                            time.sleep(retry_delay * (attempt + 1))
+                            continue
+                        else:
+                            raise PlaywrightError(f"Failed to load page {url} with status {status}")
+
+                    # Try to wait for network idle, but fall back to domcontentloaded if it times out
                     try:
-                        response = requests.get(url, headers=self.request_headers, timeout=30, verify=False)
-                        response.raise_for_status()
-                        # Continue with content processing...
-                    except Exception as e:
-                        last_error = e
-                        time.sleep(retry_delay)
-                        continue
+                        page.wait_for_load_state('networkidle', timeout=15000)  # Shorter timeout
+                    except PlaywrightTimeoutError:
+                        print(f"Network idle timeout, using domcontentloaded state for {url}")
+                        page.wait_for_load_state('domcontentloaded', timeout=15000)
+                    
+                    # Wait an additional 5 seconds to ensure dynamic content is loaded
+                    print(f"Waiting 5 seconds for dynamic content on {url}")
+                    time.sleep(5)
+                    
+                    # Get the full page HTML content
+                    html_content = page.content()
+                    context.close()
+                    browser.close()
+
+                # If successful, break the retry loop
+                print("HTML fetched successfully via Edge.")
+                break 
                 
-            except requests.exceptions.RequestException as e:
-                print(f"Request Error: {str(e)}")
+            except PlaywrightTimeoutError:
+                print(f"Edge Timeout Error fetching {url}")
+                last_error = PlaywrightTimeoutError(f"Timeout fetching {url}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                else:
+                    break
+            except PlaywrightError as e:
+                print(f"Edge Error: {str(e)}")
                 last_error = e
                 if attempt < max_retries - 1:
-                    time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                    time.sleep(retry_delay * (attempt + 1))
                     continue
-                
+                else:
+                    break
             except Exception as e:
-                print(f"Unexpected Error: {str(e)}")
+                print(f"Unexpected Error during Edge operation: {str(e)}")
                 last_error = e
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
-        
-        # If all retries failed, save error information
-        error_info = {
-            'url': url,
-            'error_type': type(last_error).__name__ if last_error else 'Unknown',
-            'error_message': str(last_error) if last_error else 'Unknown error',
-            'timestamp': datetime.now().isoformat(),
-            'is_paywalled': self._detect_paywall(BeautifulSoup('', 'html.parser'), url) if last_error else False
-        }
-        
-        # Save error information
+                else:
+                    break
+
+        # If html_content was not fetched after retries
+        if not html_content:
+            print(f"Failed to fetch content for {url} after {max_retries} attempts.")
+            error_info = {
+                'url': url,
+                'error_message': str(last_error) if last_error else 'Failed to fetch content after retries',
+                'timestamp': datetime.now().isoformat(),
+                'fetch_method': 'edge'
+            }
+            self._save_error_info(article_id, error_info)
+            return None
+
+        # Convert HTML to markdown first
+        try:
+            print("Converting HTML to markdown...")
+            markdown_content = html2text.html2text(html_content)
+            
+            # Use LLM to extract the article content from markdown
+            print("Using LLM to extract article content...")
+            llm_prompt = f"""Please extract the main article content from the following markdown text. 
+            Focus on the actual article content and remove any navigation, ads, or other non-article elements.
+            Return only the extracted content in markdown format:
+
+            {markdown_content[:4000]}  # Limit to first 4000 chars to avoid token limits
+            """
+            
+            extracted_content = self.llm.invoke(llm_prompt)
+            
+            if not extracted_content or len(extracted_content.strip()) < 100:
+                print("LLM extraction failed or returned insufficient content")
+                return None
+                
+            return {
+                'html': html_content,
+                'markdown': extracted_content,
+                'url': url
+            }
+            
+        except Exception as e:
+            print(f"Error processing content: {str(e)}")
+            error_info = {
+                'url': url,
+                'error_message': str(e),
+                'timestamp': datetime.now().isoformat(),
+                'fetch_method': 'edge'
+            }
+            self._save_error_info(article_id, error_info)
+            return None
+
+    def _save_error_info(self, article_id: str, error_info: Dict):
+        """Saves error information to a JSON file."""
         try:
             error_dir = os.path.join(self.content_dir, 'errors')
             os.makedirs(error_dir, exist_ok=True)
-            error_file = os.path.join(error_dir, f'error_{article_id}.json')
+            # Use a more specific error filename if article_id is available
+            filename = f'error_{article_id}.json' if article_id else f'error_{int(time.time())}.json'
+            error_file = os.path.join(error_dir, filename)
             with open(error_file, 'w', encoding='utf-8') as f:
                 json.dump(error_info, f, indent=2)
+            print(f"Saved error details to: {error_file}")
         except Exception as e:
-            print(f"Error saving error information: {str(e)}")
-        
-        return None
+            print(f"Critical: Error saving error information: {str(e)}")
 
     def _save_article_content(self, article_id: str, content: Dict[str, str]):
         """Save article content to files."""
@@ -411,7 +390,8 @@ class ContentAnalyzerSimple:
             return None
 
     def rank_articles(self, articles, top_n=20):
-        """Rank articles based on relevance scores, get LLM insights for top N, return top N."""
+        """Rank articles based on relevance scores, get LLM insights for top N, return top N with content."""
+        print(f"\n--- Starting Article Analysis ---")
         print(f"Analyzing {len(articles)} unique articles for initial scoring...")
         analyzed_articles = []
         for i, article in enumerate(articles):
@@ -422,44 +402,91 @@ class ContentAnalyzerSimple:
                 'article': article,
                 'analysis': analysis
             })
-        print("Scoring complete.")
+        print("Initial scoring complete.")
 
         # Sort by overall score
         sorted_articles = sorted(analyzed_articles, key=lambda x: x['analysis']['overall_score'], reverse=True)
-
-        # Select top N articles
-        top_articles_to_analyze = sorted_articles[:top_n]
-        print(f"\nSelected top {len(top_articles_to_analyze)} articles for content fetching and analysis.")
-
-        # Fetch content and get LLM insights for the top N articles
-        for i, item in enumerate(top_articles_to_analyze):
-            print(f"\nProcessing article {i+1}/{len(top_articles_to_analyze)}...")
-            article_content = None
-            article = item['article']
+        
+        # Initialize result list and tracking variables
+        successful_articles = []
+        failed_indices = []
+        current_index = 0
+        
+        print(f"\n--- Fetching Content for Top Articles ---")
+        print(f"Target: {top_n} articles with content")
+        
+        # Continue processing until we have top_n successful articles or run out of candidates
+        while len(successful_articles) < top_n and current_index < len(sorted_articles):
+            item = sorted_articles[current_index]
+            article = item.get('article')
+            analysis = item.get('analysis')
             
-            # Generate a unique ID for the article
-            article_id = f"article_{i+1:02d}_{int(time.time())}"
+            # Basic validation
+            if not article or not analysis:
+                print(f"Warning: Skipping invalid article at index {current_index}")
+                failed_indices.append(current_index)
+                current_index += 1
+                continue
+                
+            print(f"\nProcessing article {len(successful_articles) + 1}/{top_n}")
+            print(f"Article: {article.get('title', 'Unknown Title')[:80]}...")
+            print(f"Score: {analysis.get('overall_score', 0):.2f}")
             
-            # Fetch content if URL is available
-            if 'url' in article:
-                content_result = self.fetch_article_content(article['url'], article_id)
-                if content_result:
-                    article_content = content_result['markdown']
-                    item['article']['content'] = content_result
-                    print("Successfully fetched and saved article content")
+            # Generate article ID
+            safe_title = re.sub(r'[^\w\-]+', '_', article.get('title', 'untitled')[:30])
+            article_id = f"{len(successful_articles) + 1:02d}_{safe_title}_{int(time.time())}"
+            
+            # Attempt to fetch content
+            article_url = article.get('url')
+            if not article_url:
+                print("No URL found - skipping article")
+                failed_indices.append(current_index)
+                current_index += 1
+                continue
+                
+            print(f"Fetching content from: {article_url}")
+            content_result = self.fetch_article_content(article_url, article_id)
+            
+            if content_result and 'markdown' in content_result and len(content_result['markdown'].strip()) > 100:
+                # Content fetch successful
+                print("Content fetched successfully")
+                item['article']['fetched_content'] = content_result
+                
+                # Get LLM insights if enabled and content is substantial
+                if USE_LLM and analysis.get('overall_score', 0) >= LLM_THRESHOLD:
+                    print(f"Getting LLM insights...")
+                    insights = self.get_llm_insights({
+                        'title': article.get('title', ''),
+                        'description': content_result['markdown']
+                    })
+                    item['analysis']['insights'] = insights
+                    if insights:
+                        print("LLM insights generated successfully")
+                    else:
+                        print("LLM insights generation failed")
                 else:
-                    print("Could not fetch article content")
-            
-            # Get LLM insights if enabled
-            if USE_LLM and item['analysis']['overall_score'] >= LLM_THRESHOLD:
-                content_for_analysis = article_content if article_content else article.get('snippet', '')
-                insights = self.get_llm_insights({'title': article.get('title', ''), 'description': content_for_analysis})
-                item['analysis']['insights'] = insights
+                    print("Skipping LLM insights (disabled or low score)")
+                    item['analysis']['insights'] = None
+                
+                successful_articles.append(item)
+                print(f"Article {len(successful_articles)}/{top_n} processed successfully")
             else:
-                item['analysis']['insights'] = None
-
-        print("\nContent fetching and analysis complete.")
-        return top_articles_to_analyze
+                print("Failed to fetch meaningful content - skipping article")
+                failed_indices.append(current_index)
+            
+            current_index += 1
+            
+        # Summary
+        print("\n--- Content Fetching Summary ---")
+        print(f"Processed {current_index} articles total")
+        print(f"Successfully fetched content for {len(successful_articles)}/{top_n} articles")
+        print(f"Skipped {len(failed_indices)} articles due to fetch failures or invalid data")
+        
+        if len(successful_articles) < top_n:
+            print(f"\nWarning: Only found {len(successful_articles)} articles with valid content")
+            print("Consider adjusting search criteria or increasing the source article pool")
+            
+        return successful_articles
 
     def remove_duplicates(self, articles, threshold=75):
         """Remove duplicate articles based on title similarity."""
