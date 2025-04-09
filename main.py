@@ -6,7 +6,7 @@ import os
 
 def main():
     try:
-        max_articles_per_keyword=50
+        max_articles_per_keyword=10
         # Initialize the scraper
         scraper = GoogleNewsScraper(
             max_articles_per_keyword=max_articles_per_keyword,
@@ -45,7 +45,7 @@ def main():
             print("No unique articles found after duplicate removal.")
             return
             
-        top_articles = analyzer.rank_articles(unique_articles, top_n=20)
+        top_articles = analyzer.rank_articles(unique_articles, top_n=2)
         if not top_articles:
             print("No articles ranked high enough for analysis.")
             return

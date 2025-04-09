@@ -2,7 +2,7 @@
 
 import re
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from fuzzywuzzy import fuzz
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
@@ -375,7 +375,7 @@ class ContentAnalyzerSimple:
             print(f"Error saving article content: {str(e)}")
 
     def analyze_article(self, article):
-        """Analyze a single article for relevance based on keywords (no LLM call here)."""
+        """Analyze a single article for relevance based on keywords and trending factors."""
         scores = {}
         article_title = article.get('title', '').lower()
         article_desc = article.get('snippet', '').lower()
@@ -388,11 +388,19 @@ class ContentAnalyzerSimple:
                 category_score = max(category_score, (title_score + desc_score) / 2)
             scores[category] = category_score / 100.0
 
-        # Return only scores, insights will be added later for top articles
+        # Calculate overall score as weighted average of keyword relevance and trending score
+        keyword_score = max(scores.values()) if scores else 0.0
+        trending_score = self.calculate_trending_score(article, [article])  # Pass single article for initial scoring
+        
+        # Weight the scores (60% keywords, 40% trending)
+        overall_score = (0.6 * keyword_score) + (0.4 * trending_score)
+
         return {
             'scores': scores,
-            'insights': None, # Initialize insights as None
-            'overall_score': max(scores.values()) if scores else 0.0 # Handle empty scores case
+            'insights': None,  # Initialize insights as None
+            'trending_score': trending_score,
+            'keyword_score': keyword_score,
+            'overall_score': overall_score
         }
 
     def get_llm_insights(self, article_data: Dict) -> Optional[str]:
@@ -429,7 +437,7 @@ class ContentAnalyzerSimple:
             return None
 
     def rank_articles(self, articles, top_n=20):
-        """Rank articles based on relevance scores, get LLM insights for top N, return top N with content."""
+        """Rank articles based on relevance scores and trending factors."""
         print(f"\n--- Starting Article Analysis ---")
         print(f"Analyzing {len(articles)} unique articles for initial scoring...")
         analyzed_articles = []
@@ -442,6 +450,15 @@ class ContentAnalyzerSimple:
                 'analysis': analysis
             })
         print("Initial scoring complete.")
+
+        # Update trending scores with full article context
+        print("Updating trending scores with full article context...")
+        for item in analyzed_articles:
+            article = item['article']
+            trending_score = self.calculate_trending_score(article, articles)
+            # Update overall score with new trending score (60% keywords, 40% trending)
+            item['analysis']['trending_score'] = trending_score
+            item['analysis']['overall_score'] = (0.6 * item['analysis']['keyword_score']) + (0.4 * trending_score)
 
         # Sort by overall score
         sorted_articles = sorted(analyzed_articles, key=lambda x: x['analysis']['overall_score'], reverse=True)
@@ -564,25 +581,44 @@ class ContentAnalyzerSimple:
         frequency_score = min(frequency_score / 10, 1.0)  # Normalize to 0-1
 
         # Calculate time score (how recent the article is)
+        time_score = 0.5  # Default score for unknown times
         try:
-            # Use current timezone if not specified in the ISO string
-            article_time_str = article.get('published_time')
-            if article_time_str:
-                article_time = datetime.fromisoformat(article_time_str.replace('Z', '+00:00'))
-                # Make datetime aware if it's naive, assuming UTC if parsed as naive
-                if article_time.tzinfo is None:
-                     article_time = article_time.replace(tzinfo=datetime.timezone.utc)
+            article_time_str = article.get('published_time', '')
+            if article_time_str and article_time_str != 'Unknown Time':
+                # Try different date formats
+                try:
+                    # Try ISO format first
+                    article_time = datetime.fromisoformat(article_time_str.replace('Z', '+00:00'))
+                except ValueError:
+                    # If ISO format fails, try to parse relative time
+                    current_time = datetime.now(datetime.timezone.utc)
+                    if 'hour' in article_time_str.lower():
+                        hours = int(''.join(filter(str.isdigit, article_time_str)))
+                        article_time = current_time - timedelta(hours=hours)
+                    elif 'day' in article_time_str.lower():
+                        days = int(''.join(filter(str.isdigit, article_time_str)))
+                        article_time = current_time - timedelta(days=days)
+                    elif 'minute' in article_time_str.lower():
+                        minutes = int(''.join(filter(str.isdigit, article_time_str)))
+                        article_time = current_time - timedelta(minutes=minutes)
+                    elif 'week' in article_time_str.lower():
+                        weeks = int(''.join(filter(str.isdigit, article_time_str)))
+                        article_time = current_time - timedelta(weeks=weeks)
+                    else:
+                        raise ValueError(f"Unrecognized time format: {article_time_str}")
 
-                # Make now() timezone-aware (using UTC for comparison)
+                # Make datetime aware if it's naive
+                if article_time.tzinfo is None:
+                    article_time = article_time.replace(tzinfo=datetime.timezone.utc)
+
+                # Calculate time score
                 now_aware = datetime.now(datetime.timezone.utc)
                 time_diff = now_aware - article_time
                 time_score = max(1 - (time_diff.total_seconds() / (7 * 24 * 3600)), 0)  # 7 days window
-            else:
-                 time_score = 0.5 # Default score if no time provided
 
         except Exception as e:
-            print(f"Warning: Could not parse date '{article.get('published_time')}', using default time score. Error: {e}")
-            time_score = 0.5  # Default score if date parsing fails
+            print(f"Notice: Using default time score for '{article_time_str}'. Reason: {str(e)}")
+            # Keep using default time_score of 0.5
 
         # Calculate source reliability score
         trusted_sources = ['Reuters', 'Bloomberg', 'Financial Times', 'Wall Street Journal',

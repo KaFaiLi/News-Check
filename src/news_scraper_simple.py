@@ -51,37 +51,68 @@ class GoogleNewsScraper:
             raise ValueError(f"Invalid date format: {date_str}. Expected YYYY-MM-DD.")
 
     def _parse_relative_time(self, time_str: str) -> Optional[datetime]:
-        """Parses relative time strings like '1 hour ago', '2 days ago'."""
-        if not time_str:
+        """Parses relative time strings like '1 hour ago', '2 days ago', or absolute dates."""
+        if not time_str or time_str == 'Unknown Time':
             return None
+            
         time_str = time_str.lower().strip()
-        now = datetime.now(timezone.utc) # Use timezone-aware datetime
+        now = datetime.now(timezone.utc)
 
         try:
-            if 'yesterday' in time_str:
+            # Handle relative time formats
+            if 'ago' in time_str:
+                if 'hour' in time_str:
+                    hours = int(''.join(filter(str.isdigit, time_str)))
+                    return now - timedelta(hours=hours)
+                elif 'day' in time_str:
+                    days = int(''.join(filter(str.isdigit, time_str)))
+                    return now - timedelta(days=days)
+                elif 'minute' in time_str:
+                    minutes = int(''.join(filter(str.isdigit, time_str)))
+                    return now - timedelta(minutes=minutes)
+                elif 'week' in time_str:
+                    weeks = int(''.join(filter(str.isdigit, time_str)))
+                    return now - timedelta(weeks=weeks)
+                elif 'month' in time_str:
+                    months = int(''.join(filter(str.isdigit, time_str)))
+                    # Approximate months as 30 days
+                    return now - timedelta(days=30 * months)
+            elif 'yesterday' in time_str:
                 return now - timedelta(days=1)
-            if 'hour' in time_str:
-                hours = int(re.search(r'(\d+)\s+hour', time_str).group(1))
-                return now - timedelta(hours=hours)
-            if 'day' in time_str:
-                days = int(re.search(r'(\d+)\s+day', time_str).group(1))
-                return now - timedelta(days=days)
-            if 'minute' in time_str:
-                 minutes = int(re.search(r'(\d+)\s+minute', time_str).group(1))
-                 return now - timedelta(minutes=minutes)
-            # Add more cases if needed (weeks, months - less precise)
-            # Try parsing as absolute date if format matches Mmm D, YYYY or similar
-            try:
-                # Example: 'Dec 5, 2023' - adjust format as needed
-                return datetime.strptime(time_str, '%b %d, %Y').replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass # Not an absolute date we handle
+            elif 'today' in time_str:
+                return now
+            
+            # Try common absolute date formats
+            date_formats = [
+                '%b %d, %Y',       # Dec 25, 2023
+                '%B %d, %Y',       # December 25, 2023
+                '%Y-%m-%d',        # 2023-12-25
+                '%d %b %Y',        # 25 Dec 2023
+                '%d %B %Y',        # 25 December 2023
+                '%Y/%m/%d',        # 2023/12/25
+                '%d/%m/%Y',        # 25/12/2023
+                '%m/%d/%Y',        # 12/25/2023
+                '%b %d',           # Dec 25 (current year)
+                '%B %d'            # December 25 (current year)
+            ]
+            
+            for date_format in date_formats:
+                try:
+                    # For formats without year, add the current year
+                    if '%Y' not in date_format:
+                        parsed_date = datetime.strptime(time_str, date_format).replace(year=now.year)
+                    else:
+                        parsed_date = datetime.strptime(time_str, date_format)
+                    return parsed_date.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+
+            # If we get here, no format matched
+            return None
 
         except Exception as e:
-            # print(f"Debug: Could not parse relative time '{time_str}': {e}") # Optional debug
-            pass # Ignore if parsing fails
-
-        return None # Return None if format is unrecognized
+            print(f"Debug: Could not parse time '{time_str}': {e}")
+            return None
 
     def _get_results_per_request(self, target_articles: int) -> int:
         """Determine optimal number of results per request based on target articles."""
