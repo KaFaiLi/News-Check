@@ -3,6 +3,7 @@ from src.content_analyzer_simple import ContentAnalyzerSimple
 from src.document_generator import DocumentGenerator
 from datetime import datetime, timedelta
 import os
+from src.config import OUTPUT_DIR
 
 def main():
     try:
@@ -45,7 +46,7 @@ def main():
             print("No unique articles found after duplicate removal.")
             return
             
-        top_articles = analyzer.rank_articles(unique_articles, top_n=2)
+        top_articles = analyzer.rank_articles(unique_articles, top_n=5)
         if not top_articles:
             print("No articles ranked high enough for analysis.")
             return
@@ -57,6 +58,10 @@ def main():
         brief_doc_path = doc_generator.generate_brief_summary(top_articles)
         detailed_doc_path = doc_generator.generate_detailed_report(top_articles)
         
+        # Generate email content
+        email_content = doc_generator.generate_email_content(top_articles)
+        email_content_path = os.path.join(OUTPUT_DIR, f"email_content_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+        
         # Print results
         print("\nProcessing complete!")
         print(f"Brief summary: {brief_doc_path}")
@@ -66,6 +71,8 @@ def main():
         print(f"  Fintech: {topic_summary['fintech_count']} articles")
         print(f"  GenAI Usage: {topic_summary['genai_usage_count']} articles")
         print(f"  Other: {topic_summary['other_count']} articles")
+        print(f"Email content saved to: {email_content_path}")
+        print("You can now open this HTML file and copy its contents directly into your Outlook email.")
         
     except Exception as e:
         print(f"An error occurred: {str(e)}")

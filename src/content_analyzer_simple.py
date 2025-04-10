@@ -84,17 +84,17 @@ class ContentAnalyzerSimple:
         }
         # Define the prompt template once
         self.llm_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert news analyst. Analyze the article and provide key insights.
+            ("system", """You are an expert news analyst. Analyze the article and provide exactly three key insights as bullet points.
             Focus on:
-            1. Main points and key findings
+            1. Main findings or announcements
             2. Industry impact and significance
-            3. Potential future implications
-            4. Any notable quotes or statistics
-            Keep the analysis concise but informative."""),
+            3. Future implications or next steps
+            
+            Format your response as three bullet points, each starting with '•'. Keep each bullet point concise but informative."""),
             ("user", """Article Title: {title}
             Content: {description}
 
-            Provide a comprehensive analysis of this article (3-4 sentences).""")
+            Provide exactly three key insights as bullet points:""")
         ])
         self.llm_chain = self.llm_prompt | self.llm
 

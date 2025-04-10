@@ -15,6 +15,8 @@ from langchain.prompts import ChatPromptTemplate
 from src.config import OPENAI_API_KEY, OPENAI_API_BASE, OUTPUT_DIR
 from src.models import ArticleAnalysis, TrendAnalysis, BriefSummary, DetailedReport
 from urllib.parse import urljoin
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 class DocumentGenerator:
     def __init__(self, output_dir=OUTPUT_DIR, llm_instance: Optional[ChatOpenAI] = None):
@@ -178,4 +180,150 @@ class DocumentGenerator:
             document.add_paragraph()
 
         document.save(filepath)
-        return filepath 
+        return filepath
+
+    def generate_email_content(self, top_articles: List[Dict]) -> str:
+        """Generates HTML content ready for copying into Outlook email."""
+        
+        # Generate timestamp
+        timestamp = datetime.now().strftime('%A, %B %d, %Y')
+        
+        # Start building HTML content with email-client-friendly styling
+        html_content = f"""
+        <div style="font-family: Arial, sans-serif; font-size: 11pt; color: #000000; max-width: 800px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 20px 0; border-bottom: 2px solid #E9041E;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td>
+                                    <h2 style="font-size: 24pt; color: #000000; margin: 0; font-family: Arial, sans-serif;">AI & Fintech News Digest</h2>
+                                    <p style="font-size: 11pt; color: #666666; margin: 5px 0;">{timestamp}</p>
+                                </td>
+                                <td align="right">
+                                    <div style="background-color: #E9041E; color: white; padding: 5px 15px; display: inline-block;">
+                                        <span style="font-size: 14pt;">Daily Briefing</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                
+                <tr>
+                    <td style="padding: 20px; background-color: #f8f9fa; border-left: 3px solid #E9041E; margin: 20px 0;">
+                        <p style="margin: 0; color: #000000;">
+                            Welcome to your daily AI and Fintech news briefing. Today's digest features the most significant 
+                            developments in artificial intelligence, financial technology, and their industry applications. 
+                            These carefully selected stories represent the most impactful developments in the last 24 hours.
+                        </p>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding: 20px 0;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td>
+                                    <h3 style="font-size: 14pt; color: #000000; margin: 0 0 20px 0; padding: 0;">
+                                        <span style="border-left: 4px solid #E9041E; padding-left: 10px;">Today's Top Stories</span>
+                                    </h3>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+        """
+        
+        # Add top 3 articles with email-client-friendly styling
+        for i, item in enumerate(top_articles[:3], 1):
+            article = item.get('article', {})
+            analysis = item.get('analysis', {})
+            
+            title = article.get('title', 'No Title Provided')
+            source = article.get('source', 'Unknown Source')
+            pub_time_str = article.get('published_time', 'Unknown Time')
+            url = article.get('url', '#')
+            
+            try:
+                pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%I:%M %p') if pub_time_str != 'Unknown Time' else pub_time_str
+            except:
+                pub_time = pub_time_str
+            
+            insights = analysis.get('insights', 'No analysis available.')
+            insights_str = str(insights) if insights else 'No analysis available.'
+            
+            # Use alternating background colors
+            bg_color = '#f8f9fa' if i % 2 == 0 else '#ffffff'
+            
+            html_content += f"""
+                <tr>
+                    <td style="padding: 0 0 25px 0;">
+                        <table width="100%" cellpadding="20" cellspacing="0" style="border: 1px solid #eeeeee; background-color: {bg_color};">
+                            <tr>
+                                <td style="border-left: 4px solid #E9041E;">
+                                    <table width="100%" cellpadding="0" cellspacing="0">
+                                        <tr>
+                                            <td>
+                                                <table width="100%" cellpadding="0" cellspacing="0">
+                                                    <tr>
+                                                        <td style="padding-right: 15px; width: 1%; white-space: nowrap;">
+                                                            <span style="background-color: #E9041E; color: white; padding: 4px 12px; font-size: 11pt; display: inline-block;">News {i}</span>
+                                                        </td>
+                                                        <td width="99%">
+                                                            <a href="{url}" style="color: #000000; text-decoration: none; font-weight: bold; font-size: 13pt;">{title}</a>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 10px 0;">
+                                                <span style="color: #000000; font-weight: bold;">{source}</span>
+                                                <span style="color: #666666; margin: 0 8px;">•</span>
+                                                <span style="color: #666666;">{pub_time}</span>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding-top: 12px; border-top: 1px solid #eeeeee;">
+                                                <div style="color: #000000; line-height: 1.6;">
+                                                    {insights_str.replace('•', '<br>•').strip()}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            """
+        
+        # Add footer with email-client-friendly styling
+        html_content += """
+                <tr>
+                    <td style="padding: 20px 0; border-top: 1px solid #eeeeee; background-color: #f8f9fa;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td style="padding-left: 20px; border-left: 4px solid #E9041E;">
+                                    <p style="margin: 0; color: #000000; font-weight: bold;">About this digest</p>
+                                    <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">This digest is auto-generated based on relevance and impact analysis.</p>
+                                    <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">For any questions or feedback, please reply to this email.</p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        """
+        
+        # Save the HTML content to a file for backup
+        timestamp_file = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"email_content_{timestamp_file}.html"
+        filepath = os.path.join(self.output_dir, filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+            
+        return html_content 
