@@ -216,6 +216,9 @@ class DocumentGenerator:
                             Welcome to your daily AI and Fintech news briefing. Today's digest features the most significant 
                             developments in artificial intelligence, financial technology, and their industry applications. 
                             These carefully selected stories represent the most impactful developments in the last 24 hours.
+                            <br>
+                            <br>
+                            You may click the title to read the full article.
                         </p>
                     </td>
                 </tr>
@@ -307,6 +310,7 @@ class DocumentGenerator:
                             <tr>
                                 <td style="padding-left: 20px; border-left: 4px solid #E9041E;">
                                     <p style="margin: 0; color: #000000; font-weight: bold;">About this digest</p>
+                                    <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">More news in the attachemnts...</p>
                                     <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">This digest is auto-generated based on relevance and impact analysis.</p>
                                     <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">For any questions or feedback, please reply to this email.</p>
                                 </td>

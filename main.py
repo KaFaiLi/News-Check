@@ -7,7 +7,7 @@ from src.config import OUTPUT_DIR
 
 def main():
     try:
-        max_articles_per_keyword=10
+        max_articles_per_keyword=5
         # Initialize the scraper
         scraper = GoogleNewsScraper(
             max_articles_per_keyword=max_articles_per_keyword,
@@ -17,9 +17,9 @@ def main():
 
         # Define search parameters
         keywords = [
-            'artificial intelligence research', 'machine learning breakthrough', 'neural network development',
+            'neural network development', 'OpenAI', 'Claude', 'LLM development',
             'fintech innovation', 'digital banking technology', 'blockchain finance',
-            'generative AI', 'ChatGPT enterprise', 'AI content creation'
+            'AI in finance', 'AI in banking', 'AI in investment', 'AI in wealth management',
         ]
         
         # Set date range
@@ -46,7 +46,7 @@ def main():
             print("No unique articles found after duplicate removal.")
             return
             
-        top_articles = analyzer.rank_articles(unique_articles, top_n=5)
+        top_articles = analyzer.rank_articles(unique_articles, top_n=10)
         if not top_articles:
             print("No articles ranked high enough for analysis.")
             return

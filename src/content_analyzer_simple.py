@@ -395,12 +395,20 @@ class ContentAnalyzerSimple:
         # Weight the scores (60% keywords, 40% trending)
         overall_score = (0.6 * keyword_score) + (0.4 * trending_score)
 
+        # Determine primary category
+        primary_category = 'Other'
+        if scores:
+            primary_category = max(scores, key=scores.get)
+            if scores[primary_category] < 0.1:  # Threshold for meaningful category assignment
+                primary_category = 'Other'
+
         return {
             'scores': scores,
             'insights': None,  # Initialize insights as None
             'trending_score': trending_score,
             'keyword_score': keyword_score,
-            'overall_score': overall_score
+            'overall_score': overall_score,
+            'primary_category': primary_category
         }
 
     def get_llm_insights(self, article_data: Dict) -> Optional[str]:
@@ -437,9 +445,11 @@ class ContentAnalyzerSimple:
             return None
 
     def rank_articles(self, articles, top_n=20):
-        """Rank articles based on relevance scores and trending factors."""
+        """Rank articles based on relevance scores and trending factors, ensuring minimum Fintech articles."""
         print(f"\n--- Starting Article Analysis ---")
         print(f"Analyzing {len(articles)} unique articles for initial scoring...")
+        
+        # First pass: analyze all articles
         analyzed_articles = []
         for i, article in enumerate(articles):
             if (i + 1) % 50 == 0:
@@ -460,8 +470,55 @@ class ContentAnalyzerSimple:
             item['analysis']['trending_score'] = trending_score
             item['analysis']['overall_score'] = (0.6 * item['analysis']['keyword_score']) + (0.4 * trending_score)
 
-        # Sort by overall score
+        # Sort all articles by overall score
         sorted_articles = sorted(analyzed_articles, key=lambda x: x['analysis']['overall_score'], reverse=True)
+        
+        # Select initial top_n articles
+        selected_articles = sorted_articles[:top_n]
+        
+        # Count Fintech articles in selection
+        fintech_count = sum(1 for item in selected_articles 
+                          if item['analysis']['primary_category'] == 'Fintech')
+        
+        # If we need more Fintech articles
+        if fintech_count < 3:
+            print(f"\n--- Adjusting for minimum Fintech articles ---")
+            print(f"Current Fintech count: {fintech_count}, target: 3")
+            
+            # Get remaining articles (those not in top_n)
+            remaining_articles = sorted_articles[top_n:]
+            
+            # Find Fintech articles from remaining pool
+            available_fintech = [item for item in remaining_articles 
+                               if item['analysis']['primary_category'] == 'Fintech']
+            
+            # Sort available Fintech articles by score
+            available_fintech.sort(key=lambda x: x['analysis']['overall_score'], reverse=True)
+            
+            # Find non-Fintech articles in selection that can be replaced
+            replaceable_articles = [item for item in selected_articles 
+                                  if item['analysis']['primary_category'] != 'Fintech']
+            
+            # Sort replaceable articles by score (lowest first)
+            replaceable_articles.sort(key=lambda x: x['analysis']['overall_score'])
+            
+            # Perform replacements
+            while fintech_count < 3 and available_fintech and replaceable_articles:
+                # Remove lowest scoring non-Fintech article
+                removed = replaceable_articles.pop(0)
+                selected_articles.remove(removed)
+                
+                # Add highest scoring available Fintech article
+                added = available_fintech.pop(0)
+                selected_articles.append(added)
+                
+                fintech_count += 1
+                print(f"Replaced article '{removed['article'].get('title', '')[:50]}...' with Fintech article '{added['article'].get('title', '')[:50]}...'")
+            
+            # Re-sort the final selection
+            selected_articles.sort(key=lambda x: x['analysis']['overall_score'], reverse=True)
+            
+            print(f"Final Fintech count: {fintech_count}")
         
         # Initialize result list and tracking variables
         successful_articles = []
@@ -471,21 +528,19 @@ class ContentAnalyzerSimple:
         print(f"\n--- Fetching Content for Top Articles ---")
         print(f"Target: {top_n} articles with content")
         
-        # Continue processing until we have top_n successful articles or run out of candidates
-        while len(successful_articles) < top_n and current_index < len(sorted_articles):
-            item = sorted_articles[current_index]
+        # Process the final selection of articles
+        for item in selected_articles:
             article = item.get('article')
             analysis = item.get('analysis')
             
             # Basic validation
             if not article or not analysis:
-                print(f"Warning: Skipping invalid article at index {current_index}")
-                failed_indices.append(current_index)
-                current_index += 1
+                print(f"Warning: Skipping invalid article")
                 continue
                 
             print(f"\nProcessing article {len(successful_articles) + 1}/{top_n}")
             print(f"Article: {article.get('title', 'Unknown Title')[:80]}...")
+            print(f"Category: {analysis.get('primary_category', 'Unknown')}")
             print(f"Score: {analysis.get('overall_score', 0):.2f}")
             
             # Generate article ID
@@ -496,8 +551,6 @@ class ContentAnalyzerSimple:
             article_url = article.get('url')
             if not article_url:
                 print("No URL found - skipping article")
-                failed_indices.append(current_index)
-                current_index += 1
                 continue
                 
             print(f"Fetching content from: {article_url}")
@@ -528,16 +581,22 @@ class ContentAnalyzerSimple:
                 print(f"Article {len(successful_articles)}/{top_n} processed successfully")
             else:
                 print("Failed to fetch meaningful content - skipping article")
-                failed_indices.append(current_index)
-            
-            current_index += 1
             
         # Summary
         print("\n--- Content Fetching Summary ---")
-        print(f"Processed {current_index} articles total")
+        print(f"Processed {len(selected_articles)} articles total")
         print(f"Successfully fetched content for {len(successful_articles)}/{top_n} articles")
-        print(f"Skipped {len(failed_indices)} articles due to fetch failures or invalid data")
         
+        # Category distribution in final results
+        category_counts = {}
+        for item in successful_articles:
+            category = item['analysis']['primary_category']
+            category_counts[category] = category_counts.get(category, 0) + 1
+        
+        print("\n--- Final Category Distribution ---")
+        for category, count in category_counts.items():
+            print(f"{category}: {count} articles")
+            
         if len(successful_articles) < top_n:
             print(f"\nWarning: Only found {len(successful_articles)} articles with valid content")
             print("Consider adjusting search criteria or increasing the source article pool")
