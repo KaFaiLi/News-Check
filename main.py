@@ -7,7 +7,7 @@ from src.config import OUTPUT_DIR
 
 def main():
     try:
-        max_articles_per_keyword=5
+        max_articles_per_keyword=100
         # Initialize the scraper
         scraper = GoogleNewsScraper(
             max_articles_per_keyword=max_articles_per_keyword,
@@ -29,7 +29,7 @@ def main():
         print(f"\nFetching news from {start_date} to {end_date}")
         
         # Get news articles
-        df = scraper.get_news(keywords, start_date, end_date, max_articles=max_articles_per_keyword)
+        df = scraper.get_news(keywords, start_date, end_date, max_articles=max_articles_per_keyword*1000)
         df.to_excel('Output/news_articles.xlsx', index=False)
 
         if df.empty:
