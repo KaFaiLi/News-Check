@@ -185,60 +185,212 @@ class DocumentGenerator:
     def generate_email_content(self, top_articles: List[Dict]) -> str:
         """Generates HTML content ready for copying into Outlook email."""
         
-        # Generate timestamp
-        timestamp = datetime.now().strftime('%A, %B %d, %Y')
+        # Generate timestamp for the email header
+        timestamp = datetime.now().strftime('%A, %B %d, %Y') # e.g., Monday, June 10, 2024
         
         # Start building HTML content with email-client-friendly styling
-        html_content = f"""
-        <div style="font-family: Arial, sans-serif; font-size: 11pt; color: #000000; max-width: 800px;">
-            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
-                <tr>
-                    <td style="padding: 20px 0; border-bottom: 2px solid #E9041E;">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                                <td>
-                                    <h2 style="font-size: 24pt; color: #000000; margin: 0; font-family: Arial, sans-serif;">AI & Fintech News Digest</h2>
-                                    <p style="font-size: 11pt; color: #666666; margin: 5px 0;">{timestamp}</p>
-                                </td>
-                                <td align="right">
-                                    <div style="background-color: #E9041E; color: white; padding: 5px 15px; display: inline-block;">
-                                        <span style="font-size: 14pt;">Daily Briefing</span>
-                                    </div>
-                                </td>
-                            </tr>
-                        </table>
+        # Using CSS classes and a <style> block for better organization and some responsiveness
+        html_content = f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI & Fintech News Digest</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5; /* Light grey background for the email client viewport */
+            font-family: Arial, sans-serif;
+            -webkit-text-size-adjust: 100%; /* Prevent iOS font scaling */
+            -ms-text-size-adjust: 100%; /* Prevent Windows Mobile font scaling */
+        }}
+        table {{ /* Outlook fix for unwanted spacing */
+            border-collapse: collapse;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+        }}
+        .email-container {{
+            max-width: 700px;
+            margin: 20px auto; /* Centering and top/bottom margin */
+            background-color: #ffffff; /* White background for the content area */
+            border: 1px solid #dddddd;
+            font-family: Arial, sans-serif;
+            font-size: 11pt;
+            color: #333333;
+        }}
+        .header {{
+            padding: 25px 30px;
+            border-bottom: 4px solid #E9041E; /* Company red accent */
+            background-color: #ffffff;
+        }}
+        .header h1 {{
+            font-size: 24pt;
+            color: #1A1A1A; /* Darker, professional black */
+            margin: 0 0 5px 0;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-weight: bold;
+        }}
+        .header p {{
+            font-size: 11pt;
+            color: #555555;
+            margin: 0;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }}
+        .intro-section {{
+            padding: 25px 30px;
+            background-color: #f8f8f8; /* Very light grey for intro box */
+        }}
+        .intro-section p {{
+            margin: 0;
+            color: #333333;
+            line-height: 1.6;
+            font-size: 11pt;
+        }}
+        .stories-title-section {{
+            padding: 25px 30px 15px 30px; /* Added more top padding */
+        }}
+        .stories-title-section h3 {{
+            font-size: 17pt;
+            color: #1A1A1A;
+            margin: 0;
+            padding-bottom: 8px;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-weight: bold;
+        }}
+        .article-item {{
+            padding: 0px 30px 25px 30px; /* Padding around each article block */
+        }}
+        .article-table {{
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid #e0e0e0; /* Softer border for article box */
+        }}
+        .article-accent-cell {{
+            width: 6px; /* Width of the red accent bar */
+            background-color: #E9041E;
+            font-size: 1px; /* Fix for some clients adding height */
+            line-height: 1px; /* Fix for some clients adding height */
+        }}
+        .article-content-cell {{
+            padding: 20px;
+        }}
+        .article-title {{ /* Encapsulating paragraph for title */
+            margin: 0 0 8px 0;
+        }}
+        .article-title a {{
+            font-size: 14pt;
+            color: #222222; /* Dark, near-black for article titles */
+            font-weight: bold;
+            text-decoration: none;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }}
+        .article-title a:hover {{
+            text-decoration: underline;
+        }}
+        .article-meta {{
+            margin: 0 0 12px 0; /* Adjusted margin */
+            font-size: 10pt;
+            color: #555555;
+            font-family: Arial, sans-serif;
+        }}
+        .article-insights {{
+            font-size: 11pt;
+            color: #333333;
+            line-height: 1.6;
+            font-family: Arial, sans-serif;
+        }}
+        .article-insights ul {{
+            margin: 10px 0 0 0; /* Top margin for ul */
+            padding-left: 20px; /* Indent for bullet points */
+        }}
+        .article-insights li {{
+            margin-bottom: 6px; /* Spacing between list items */
+        }}
+        .article-insights p {{ /* Paragraphs within insights */
+            margin: 10px 0 0 0;
+        }}
+        .read-more-link a {{
+            font-size: 10.5pt;
+            color: #444444; /* Dark grey for the link */
+            text-decoration: none;
+            font-weight: bold;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }}
+        .read-more-link a:hover {{
+            text-decoration: underline;
+        }}
+        .footer {{
+            padding: 25px 30px;
+            border-top: 1px solid #dddddd;
+            background-color: #f0f0f0; /* Light grey for footer */
+            text-align: center;
+        }}
+        .footer p {{
+            margin: 0 0 8px 0; /* Increased bottom margin */
+            font-size: 9.5pt; /* Slightly adjusted for readability */
+            color: #666666;
+            line-height: 1.5;
+        }}
+        .footer p:last-child {{
+            margin-bottom: 0;
+        }}
+        /* Alternating background colors for articles */
+        .bg-white {{ background-color: #ffffff; }}
+        .bg-lightgrey {{ background-color: #f9f9f9; }}
+
+        /* Responsive considerations */
+        @media screen and (max-width: 600px) {{
+            .email-container {{
+                width: 100% !important;
+                margin: 0 auto !important;
+                border-left: none !important;
+                border-right: none !important;
+            }}
+            .header, .intro-section, .stories-title-section, .article-item, .footer {{
+                padding-left: 20px !important;
+                padding-right: 20px !important;
+            }}
+            .header h1 {{ font-size: 20pt !important; }}
+            .stories-title-section h3 {{ font-size: 15pt !important; }}
+            .article-title a {{ font-size: 13pt !important; }}
+        }}
+    </style>
+</head>
+<body>
+    <table class="email-container" width="700" align="center" cellpadding="0" cellspacing="0" role="presentation" style="width: 700px;">
+        <!-- Header -->
+        <tr>
+            <td class="header">
+                <h1>AI & Fintech News Digest</h1>
+                <p>Daily Briefing &bull; {timestamp}</p>
                     </td>
                 </tr>
                 
-                <tr>
-                    <td style="padding: 20px; background-color: #f8f9fa; border-left: 3px solid #E9041E; margin: 20px 0;">
-                        <p style="margin: 0; color: #000000;">
-                            Welcome to your daily AI and Fintech news briefing. Today's digest features the most significant 
-                            developments in artificial intelligence, financial technology, and their industry applications. 
-                            These carefully selected stories represent the most impactful developments in the last 24 hours.
-                            <br>
-                            <br>
-                            You may click the title to read the full article.
+        <!-- Intro Section -->
+        <tr>
+            <td class="intro-section">
+                <p>
+                    Welcome to your daily AI and Fintech news briefing. This digest highlights key developments
+                    in artificial intelligence and financial technology from the past 24 hours.
+                    Click on any article title to read the full story.
                         </p>
                     </td>
                 </tr>
 
-                <tr>
-                    <td style="padding: 20px 0;">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                                <td>
-                                    <h3 style="font-size: 14pt; color: #000000; margin: 0 0 20px 0; padding: 0;">
-                                        <span style="border-left: 4px solid #E9041E; padding-left: 10px;">Today's Top Stories</span>
-                                    </h3>
-                                </td>
-                            </tr>
-                        </table>
+        <!-- Spacer row for visual separation -->
+        <tr><td style="height:10px; background-color: #ffffff; font-size: 1px; line-height: 1px;">&nbsp;</td></tr>
+
+        <!-- Top Stories Title -->
+        <tr>
+            <td class="stories-title-section">
+                <h3>Today's Top Stories</h3>
                     </td>
                 </tr>
         """
         
-        # Add top 3 articles with email-client-friendly styling
+        # Add top 3 articles with new styling
         for i, item in enumerate(top_articles[:3], 1):
             article = item.get('article', {})
             analysis = item.get('analysis', {})
@@ -251,78 +403,84 @@ class DocumentGenerator:
             try:
                 pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%I:%M %p') if pub_time_str != 'Unknown Time' else pub_time_str
             except:
-                pub_time = pub_time_str
+                pub_time = pub_time_str # Fallback to original string if parsing fails
             
-            insights = analysis.get('insights', 'No analysis available.')
-            insights_str = str(insights) if insights else 'No analysis available.'
+            insights = analysis.get('insights', None) # Get None to better distinguish from "No analysis" string
             
-            # Use alternating background colors
-            bg_color = '#f8f9fa' if i % 2 == 0 else '#ffffff'
+            processed_insights_html = ""
+            if isinstance(insights, list) and insights:
+                # Filter out empty strings from list before joining
+                valid_insights = [str(insight).strip() for insight in insights if str(insight).strip()]
+                if valid_insights:
+                    processed_insights_html = "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>" + "".join(f"<li style='margin-bottom: 6px;'>{insight}</li>" for insight in valid_insights) + "</ul>"
+                else:
+                    processed_insights_html = "<p style='margin: 10px 0 0 0;'>No specific insights provided.</p>"
+            elif isinstance(insights, str) and insights.strip():
+                insights_str = insights.strip()
+                if '•' in insights_str: # Check if string contains bullet points
+                    points = [p.strip() for p in insights_str.split('•') if p.strip()]
+                    if points:
+                         processed_insights_html = "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>" + "".join(f"<li style='margin-bottom: 6px;'>{point}</li>" for point in points) + "</ul>"
+                    else: # String had '•' but resulted in no points
+                        processed_insights_html = f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
+                else: # Plain string without bullets
+                    processed_insights_html = f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
+            else: # Handles None, empty string, or empty list for insights
+                 processed_insights_html = "<p style='margin: 10px 0 0 0;'>No analysis available for this article.</p>"
+
+            # Alternating background for article content cell
+            content_bg_class = 'bg-lightgrey' if i % 2 == 0 else 'bg-white'
             
-            html_content += f"""
-                <tr>
-                    <td style="padding: 0 0 25px 0;">
-                        <table width="100%" cellpadding="20" cellspacing="0" style="border: 1px solid #eeeeee; background-color: {bg_color};">
-                            <tr>
-                                <td style="border-left: 4px solid #E9041E;">
-                                    <table width="100%" cellpadding="0" cellspacing="0">
-                                        <tr>
-                                            <td>
-                                                <table width="100%" cellpadding="0" cellspacing="0">
-                                                    <tr>
-                                                        <td style="padding-right: 15px; width: 1%; white-space: nowrap;">
-                                                            <span style="background-color: #E9041E; color: white; padding: 4px 12px; font-size: 11pt; display: inline-block;">News {i}</span>
-                                                        </td>
-                                                        <td width="99%">
-                                                            <a href="{url}" style="color: #000000; text-decoration: none; font-weight: bold; font-size: 13pt;">{title}</a>
-                                                        </td>
-                                                    </tr>
-                                                </table>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td style="padding: 10px 0;">
-                                                <span style="color: #000000; font-weight: bold;">{source}</span>
-                                                <span style="color: #666666; margin: 0 8px;">•</span>
-                                                <span style="color: #666666;">{pub_time}</span>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td style="padding-top: 12px; border-top: 1px solid #eeeeee;">
-                                                <div style="color: #000000; line-height: 1.6;">
-                                                    {insights_str.replace('•', '<br>•').strip()}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
+            html_content += f"""\
+        <!-- Article {i} -->
+        <tr>
+            <td class="article-item">
+                <table class="article-table" cellpadding="0" cellspacing="0" role="presentation">
+                    <tr>
+                        <td class="article-accent-cell" style="width: 6px; background-color: #E9041E; font-size: 1px; line-height: 1px;">&nbsp;</td>
+                        <td class="article-content-cell {content_bg_class}">
+                            <p class="article-title">
+                                <a href="{url}" target="_blank">{i}. {title}</a>
+                            </p>
+                            <p class="article-meta">
+                                {source} &bull; {pub_time}
+                            </p>
+                            <div class="article-insights">
+                                {processed_insights_html}
+                            </div>
+                            <p class="read-more-link" style="margin-top: 12px; margin-bottom: 0;">
+                                <a href="{url}" target="_blank">Read Full Article &rarr;</a>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
             """
         
-        # Add footer with email-client-friendly styling
-        html_content += """
-                <tr>
-                    <td style="padding: 20px 0; border-top: 1px solid #eeeeee; background-color: #f8f9fa;">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                                <td style="padding-left: 20px; border-left: 4px solid #E9041E;">
-                                    <p style="margin: 0; color: #000000; font-weight: bold;">About this digest</p>
-                                    <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">More news in the attachemnts...</p>
-                                    <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">This digest is auto-generated based on relevance and impact analysis.</p>
-                                    <p style="margin: 5px 0 0 0; color: #666666; font-size: 10pt;">For any questions or feedback, please reply to this email.</p>
+        # Add footer with new styling
+        html_content += f"""\
+        <!-- Spacer row before footer -->
+        <tr><td style="height:10px; background-color: #ffffff; font-size: 1px; line-height: 1px;">&nbsp;</td></tr>
+        
+        <!-- Footer -->
+        <tr>
+            <td class="footer">
+                <p>
+                    This AI & Fintech News Digest is automatically generated. For a more comprehensive overview, the full report may be available as an attachment.
+                </p>
+                <p>
+                    For feedback or inquiries, please reply to this email.
+                </p>
+                <p style="margin-top:15px; color: #888888;">&copy; {datetime.now().year} [Your Company Name]. All rights reserved.</p>
                                 </td>
                             </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-        </div>
-        """
+    </table> <!-- End of email-container table -->
+</body>
+</html>
+"""
         
-        # Save the HTML content to a file for backup
+        # Save the HTML content to a file for backup/review
         timestamp_file = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"email_content_{timestamp_file}.html"
         filepath = os.path.join(self.output_dir, filename)

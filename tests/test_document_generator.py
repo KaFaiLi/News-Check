@@ -1,6 +1,7 @@
 import unittest
 import os
 from unittest.mock import patch, MagicMock
+from datetime import datetime
 from src.document_generator import DocumentGenerator
 
 class TestDocumentGenerator(unittest.TestCase):
@@ -91,6 +92,56 @@ class TestDocumentGenerator(unittest.TestCase):
         filepath = self.generator.generate_brief_summary([])
         self.assertTrue(os.path.exists(filepath))
         self.assertTrue(filepath.endswith('.docx'))
+
+    def test_generate_email_content(self):
+        """Test HTML email content generation and structure."""
+        html_content = self.generator.generate_email_content(self.test_articles)
+
+        self.assertIsInstance(html_content, str)
+        self.assertTrue(len(html_content) > 0)
+
+        # Check for main structural elements and styling
+        self.assertIn("<!DOCTYPE html>", html_content)
+        self.assertIn("<html lang=\"en\">", html_content)
+        self.assertIn("<style>", html_content) # Check for style block
+        self.assertIn("body {", html_content) # Check for body style
+        self.assertIn(".email-container {", html_content) # Check for main container style
+        self.assertIn("class=\"email-container\"", html_content)
+        self.assertIn("class=\"header\"", html_content)
+        self.assertIn("border-bottom: 4px solid #E9041E;", html_content) # Company red in header
+        self.assertIn("class=\"intro-section\"", html_content)
+        self.assertIn("<h3>Today's Top Stories</h3>", html_content)
+        self.assertIn("class=\"article-item\"", html_content)
+        self.assertIn("class=\"footer\"", html_content)
+        
+        # Check for company red accent on articles (at least one instance)
+        self.assertIn("background-color: #E9041E;", html_content)
+
+        # Check content from test_articles (top_articles[:3] is used in method)
+        for i, item in enumerate(self.test_articles[:3]):
+            article_data = item['article']
+            analysis_data = item['analysis']
+            self.assertIn(article_data['title'], html_content)
+            self.assertIn(article_data['source'], html_content)
+            # Test insights formatting (basic check, as it can be list or string)
+            if isinstance(analysis_data['insights'], list):
+                for insight_point in analysis_data['insights']:
+                    self.assertIn(insight_point, html_content)
+            else:
+                self.assertIn(analysis_data['insights'], html_content)
+            self.assertIn(f"{i+1}. {article_data['title']}", html_content) # Check for numbered title
+
+        # Check footer content
+        current_year = datetime.now().year
+        self.assertIn(f"&copy; {current_year} [Your Company Name]. All rights reserved.", html_content)
+
+        # Check if the HTML file was saved
+        saved_files = [f for f in os.listdir(self.test_output_dir) if f.startswith("email_content_") and f.endswith(".html")]
+        self.assertTrue(len(saved_files) > 0, "No HTML email file found in output directory")
+        if saved_files:
+            filepath = os.path.join(self.test_output_dir, saved_files[0])
+            self.assertTrue(os.path.exists(filepath))
+            self.assertTrue(os.path.getsize(filepath) > 0)
 
 if __name__ == '__main__':
     unittest.main() 
