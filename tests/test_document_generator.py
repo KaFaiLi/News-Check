@@ -100,22 +100,21 @@ class TestDocumentGenerator(unittest.TestCase):
         self.assertIsInstance(html_content, str)
         self.assertTrue(len(html_content) > 0)
 
-        # Check for main structural elements and styling
+        # Check for main structural elements (inline styles, no CSS classes)
         self.assertIn("<!DOCTYPE html>", html_content)
         self.assertIn("<html lang=\"en\">", html_content)
-        self.assertIn("<style>", html_content) # Check for style block
-        self.assertIn("body {", html_content) # Check for body style
-        self.assertIn(".email-container {", html_content) # Check for main container style
-        self.assertIn("class=\"email-container\"", html_content)
-        self.assertIn("class=\"header\"", html_content)
-        self.assertIn("border-bottom: 4px solid #E9041E;", html_content) # Company red in header
-        self.assertIn("class=\"intro-section\"", html_content)
-        self.assertIn("<h3>Today's Top Stories</h3>", html_content)
-        self.assertIn("class=\"article-item\"", html_content)
-        self.assertIn("class=\"footer\"", html_content)
+        # Should NOT have a style block - using inline styles for Outlook compatibility
+        self.assertNotIn("<style>", html_content)
+        # Check for inline styles on body
+        self.assertIn("<body style=", html_content)
+        # Check for red accent in header (updated color #dc2626)
+        self.assertIn("border-bottom: 4px solid #dc2626;", html_content)
+        # Check for main heading
+        self.assertIn("AI & Fintech News Digest", html_content)
+        self.assertIn("Today's Top Stories", html_content)
         
-        # Check for company red accent on articles (at least one instance)
-        self.assertIn("background-color: #E9041E;", html_content)
+        # Check for red accent on articles (updated color #dc2626)
+        self.assertIn("background-color: #dc2626;", html_content)
 
         # Check content from test_articles (top_articles[:3] is used in method)
         for i, item in enumerate(self.test_articles[:3]):
