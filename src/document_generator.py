@@ -216,13 +216,25 @@ class DocumentGenerator:
         return filepath
 
     def generate_email_content(self, top_articles: List[Dict], degradation_status: Optional[DegradationStatus] = None) -> str:
-        """Generates HTML content ready for copying into Outlook email."""
+        """Generates HTML content ready for copying into Outlook email with inline styles."""
         
         # Generate timestamp for the email header
         timestamp = datetime.now().strftime('%A, %B %d, %Y') # e.g., Monday, June 10, 2024
         
-        # Start building HTML content with email-client-friendly styling
-        # Using CSS classes and a <style> block for better organization and some responsiveness
+        # Define color palette for consistency
+        COLORS = {
+            'background_grey': '#f3f4f6',
+            'card_white': '#ffffff',
+            'primary_red': '#dc2626',
+            'heading_black': '#111827',
+            'body_grey': '#374151',
+            'border_grey': '#e5e7eb',
+            'meta_grey': '#6b7280',
+            'footer_grey': '#f9fafb',
+            'footer_text': '#6b7280'
+        }
+        
+        # Start building HTML content with inline styles for Outlook compatibility
         html_content = f"""\
 <!DOCTYPE html>
 <html lang="en">
@@ -230,218 +242,69 @@ class DocumentGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI & Fintech News Digest</title>
-    <style>
-        body {{
-            margin: 0;
-            padding: 0;
-            background-color: #f0f2f5; /* Light grey background for the email client viewport */
-            font-family: Arial, sans-serif;
-            -webkit-text-size-adjust: 100%; /* Prevent iOS font scaling */
-            -ms-text-size-adjust: 100%; /* Prevent Windows Mobile font scaling */
-        }}
-        table {{ /* Outlook fix for unwanted spacing */
-            border-collapse: collapse;
-            mso-table-lspace: 0pt;
-            mso-table-rspace: 0pt;
-        }}
-        .email-container {{
-            max-width: 700px;
-            margin: 20px auto; /* Centering and top/bottom margin */
-            background-color: #ffffff; /* White background for the content area */
-            border: 1px solid #dddddd;
-            font-family: Arial, sans-serif;
-            font-size: 11pt;
-            color: #333333;
-        }}
-        .header {{
-            padding: 25px 30px;
-            border-bottom: 4px solid #E9041E; /* Company red accent */
-            background-color: #ffffff;
-        }}
-        .header h1 {{
-            font-size: 24pt;
-            color: #1A1A1A; /* Darker, professional black */
-            margin: 0 0 5px 0;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-weight: bold;
-        }}
-        .header p {{
-            font-size: 11pt;
-            color: #555555;
-            margin: 0;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        }}
-        .intro-section {{
-            padding: 25px 30px;
-            background-color: #f8f8f8; /* Very light grey for intro box */
-        }}
-        .intro-section p {{
-            margin: 0;
-            color: #333333;
-            line-height: 1.6;
-            font-size: 11pt;
-        }}
-        .stories-title-section {{
-            padding: 25px 30px 15px 30px; /* Added more top padding */
-        }}
-        .stories-title-section h3 {{
-            font-size: 17pt;
-            color: #1A1A1A;
-            margin: 0;
-            padding-bottom: 8px;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-weight: bold;
-        }}
-        .article-item {{
-            padding: 0px 30px 25px 30px; /* Padding around each article block */
-        }}
-        .article-table {{
-            width: 100%;
-            border-collapse: collapse;
-            border: 1px solid #e0e0e0; /* Softer border for article box */
-        }}
-        .article-accent-cell {{
-            width: 6px; /* Width of the red accent bar */
-            background-color: #E9041E;
-            font-size: 1px; /* Fix for some clients adding height */
-            line-height: 1px; /* Fix for some clients adding height */
-        }}
-        .article-content-cell {{
-            padding: 20px;
-        }}
-        .article-title {{ /* Encapsulating paragraph for title */
-            margin: 0 0 8px 0;
-        }}
-        .article-title a {{
-            font-size: 14pt;
-            color: #222222; /* Dark, near-black for article titles */
-            font-weight: bold;
-            text-decoration: none;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        }}
-        .article-title a:hover {{
-            text-decoration: underline;
-        }}
-        .article-meta {{
-            margin: 0 0 12px 0; /* Adjusted margin */
-            font-size: 10pt;
-            color: #555555;
-            font-family: Arial, sans-serif;
-        }}
-        .article-insights {{
-            font-size: 11pt;
-            color: #333333;
-            line-height: 1.6;
-            font-family: Arial, sans-serif;
-        }}
-        .article-insights ul {{
-            margin: 10px 0 0 0; /* Top margin for ul */
-            padding-left: 20px; /* Indent for bullet points */
-        }}
-        .article-insights li {{
-            margin-bottom: 6px; /* Spacing between list items */
-        }}
-        .article-insights p {{ /* Paragraphs within insights */
-            margin: 10px 0 0 0;
-        }}
-        .read-more-link a {{
-            font-size: 10.5pt;
-            color: #444444; /* Dark grey for the link */
-            text-decoration: none;
-            font-weight: bold;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        }}
-        .read-more-link a:hover {{
-            text-decoration: underline;
-        }}
-        .footer {{
-            padding: 25px 30px;
-            border-top: 1px solid #dddddd;
-            background-color: #f0f0f0; /* Light grey for footer */
-            text-align: center;
-        }}
-        .footer p {{
-            margin: 0 0 8px 0; /* Increased bottom margin */
-            font-size: 9.5pt; /* Slightly adjusted for readability */
-            color: #666666;
-            line-height: 1.5;
-        }}
-        .footer p:last-child {{
-            margin-bottom: 0;
-        }}
-        /* Alternating background colors for articles */
-        .bg-white {{ background-color: #ffffff; }}
-        .bg-lightgrey {{ background-color: #f9f9f9; }}
-
-        /* Responsive considerations */
-        @media screen and (max-width: 600px) {{
-            .email-container {{
-                width: 100% !important;
-                margin: 0 auto !important;
-                border-left: none !important;
-                border-right: none !important;
-            }}
-            .header, .intro-section, .stories-title-section, .article-item, .footer {{
-                padding-left: 20px !important;
-                padding-right: 20px !important;
-            }}
-            .header h1 {{ font-size: 20pt !important; }}
-            .stories-title-section h3 {{ font-size: 15pt !important; }}
-            .article-title a {{ font-size: 13pt !important; }}
-        }}
-    </style>
 </head>
-<body>
-    <table class="email-container" width="700" align="center" cellpadding="0" cellspacing="0" role="presentation" style="width: 700px;">
-        <!-- Header -->
+<body style="margin: 0; padding: 0; background-color: {COLORS['background_grey']}; font-family: -apple-system, 'Segoe UI', Arial, sans-serif;">
+    <!-- Outer wrapper table for background -->
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0; padding: 0; background-color: {COLORS['background_grey']}; border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
         <tr>
-            <td class="header">
-                <h1>AI & Fintech News Digest</h1>
-                <p>Daily Briefing &bull; {timestamp}</p>
-                    </td>
-                </tr>
-                
-        <!-- Intro Section -->
-        <tr>
-            <td class="intro-section">
-                <p>
-                    Welcome to your daily AI and Fintech news briefing. This digest highlights key developments
-                    in artificial intelligence and financial technology from the past 24 hours.
-                    Click on any article title to read the full story.
-                </p>"""
+            <td align="center" style="padding: 20px 0;">
+                <!-- Main container table (600px centered) -->
+                <table width="600" cellpadding="0" cellspacing="0" border="0" style="width: 600px; max-width: 600px; background-color: {COLORS['card_white']}; border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+                    <!-- Header with red bottom border -->
+                    <tr>
+                        <td style="padding: 24px 24px 20px 24px; border-bottom: 4px solid {COLORS['primary_red']}; background-color: {COLORS['card_white']};">
+                            <h1 style="margin: 0 0 8px 0; padding: 0; font-size: 26px; font-weight: bold; color: {COLORS['heading_black']}; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.3;">AI & Fintech News Digest</h1>
+                            <p style="margin: 0; padding: 0; font-size: 14px; color: {COLORS['meta_grey']}; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.4;">Daily Briefing &bull; {timestamp}</p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Intro Section with grey background -->
+                    <tr>
+                        <td style="padding: 24px; background-color: {COLORS['background_grey']};">
+                            <p style="margin: 0; padding: 0; font-size: 15px; color: {COLORS['body_grey']}; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.6;">
+                                Welcome to your daily AI and Fintech news briefing. This digest highlights key developments
+                                in artificial intelligence and financial technology from the past 24 hours.
+                                Click on any article title to read the full story.
+                            </p>"""
         
         # Add degradation warning to email (Phase 5)
         if INCLUDE_DEGRADATION_WARNING and degradation_status and degradation_status.is_degraded:
             html_content += f"""
-                <div style="margin-top: 15px; padding: 15px; background-color: #fff3cd; border-left: 4px solid #ffc107;">
-                    <p style="margin: 0; color: #856404; font-weight: bold; font-size: 11pt;">
-                        ⚠️ DEGRADATION WARNING
-                    </p>
-                    <p style="margin: 5px 0 0 0; color: #856404; font-size: 10pt;">
-                        This report was generated under degraded conditions due to sustained blocking/errors.<br>
-                        Success Rate: {degradation_status.success_rate:.1%} | 
-                        Failed Attempts: {degradation_status.failed_attempts}/{degradation_status.total_attempts} | 
-                        Collected Results: {degradation_status.collected_results_count if degradation_status.collected_results_count > 0 else len(top_articles)} articles
-                    </p>
-                </div>"""
+                            <!-- Degradation Warning -->
+                            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 16px; background-color: #fef3c7; border-left: 4px solid #f59e0b;">
+                                        <p style="margin: 0 0 8px 0; padding: 0; font-size: 15px; font-weight: bold; color: #92400e; font-family: -apple-system, 'Segoe UI', Arial, sans-serif;">
+                                            ⚠️ DEGRADATION WARNING
+                                        </p>
+                                        <p style="margin: 0; padding: 0; font-size: 14px; color: #92400e; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.4;">
+                                            This report was generated under degraded conditions due to sustained blocking/errors.<br>
+                                            Success Rate: {degradation_status.success_rate:.1%} | 
+                                            Failed Attempts: {degradation_status.failed_attempts}/{degradation_status.total_attempts} | 
+                                            Collected Results: {degradation_status.collected_results_count if degradation_status.collected_results_count > 0 else len(top_articles)} articles
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>"""
         
         html_content += """
-                        </p>
-                    </td>
-                </tr>
+                        </td>
+                    </tr>
 
-        <!-- Spacer row for visual separation -->
-        <tr><td style="height:10px; background-color: #ffffff; font-size: 1px; line-height: 1px;">&nbsp;</td></tr>
+                    <!-- Spacer row -->
+                    <tr>
+                        <td style="height: 16px; font-size: 1px; line-height: 1px;">&nbsp;</td>
+                    </tr>
 
-        <!-- Top Stories Title -->
-        <tr>
-            <td class="stories-title-section">
-                <h3>Today's Top Stories</h3>
-                    </td>
-                </tr>
+                    <!-- Top Stories Title -->
+                    <tr>
+                        <td style="padding: 0 24px 16px 24px;">
+                            <h2 style="margin: 0; padding: 0; font-size: 20px; font-weight: bold; color: """ + COLORS['heading_black'] + """; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.3;">Today's Top Stories</h2>
+                        </td>
+                    </tr>
         """
         
-        # Add top 3 articles with new styling
+        # Add top 3 articles with inline styling
         for i, item in enumerate(top_articles[:3], 1):
             article = item.get('article', {})
             analysis = item.get('analysis', {})
@@ -456,77 +319,96 @@ class DocumentGenerator:
             except:
                 pub_time = pub_time_str # Fallback to original string if parsing fails
             
-            insights = analysis.get('insights', None) # Get None to better distinguish from "No analysis" string
+            insights = analysis.get('insights', None)
             
+            # Process insights into HTML with inline styles
             processed_insights_html = ""
             if isinstance(insights, list) and insights:
                 # Filter out empty strings from list before joining
                 valid_insights = [str(insight).strip() for insight in insights if str(insight).strip()]
                 if valid_insights:
-                    processed_insights_html = "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>" + "".join(f"<li style='margin-bottom: 6px;'>{insight}</li>" for insight in valid_insights) + "</ul>"
+                    processed_insights_html = "<ul style='margin: 12px 0 0 0; padding-left: 20px; font-size: 15px; color: " + COLORS['body_grey'] + "; font-family: -apple-system, \"Segoe UI\", Arial, sans-serif; line-height: 1.6;'>"
+                    for insight in valid_insights:
+                        processed_insights_html += f"<li style='margin-bottom: 8px;'>{insight}</li>"
+                    processed_insights_html += "</ul>"
                 else:
-                    processed_insights_html = "<p style='margin: 10px 0 0 0;'>No specific insights provided.</p>"
+                    processed_insights_html = "<p style='margin: 12px 0 0 0; padding: 0; font-size: 15px; color: " + COLORS['body_grey'] + "; font-family: -apple-system, \"Segoe UI\", Arial, sans-serif; line-height: 1.6;'>No specific insights provided.</p>"
             elif isinstance(insights, str) and insights.strip():
                 insights_str = insights.strip()
                 if '•' in insights_str: # Check if string contains bullet points
                     points = [p.strip() for p in insights_str.split('•') if p.strip()]
                     if points:
-                         processed_insights_html = "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>" + "".join(f"<li style='margin-bottom: 6px;'>{point}</li>" for point in points) + "</ul>"
-                    else: # String had '•' but resulted in no points
-                        processed_insights_html = f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
+                        processed_insights_html = "<ul style='margin: 12px 0 0 0; padding-left: 20px; font-size: 15px; color: " + COLORS['body_grey'] + "; font-family: -apple-system, \"Segoe UI\", Arial, sans-serif; line-height: 1.6;'>"
+                        for point in points:
+                            processed_insights_html += f"<li style='margin-bottom: 8px;'>{point}</li>"
+                        processed_insights_html += "</ul>"
+                    else:
+                        processed_insights_html = f"<p style='margin: 12px 0 0 0; padding: 0; font-size: 15px; color: {COLORS['body_grey']}; font-family: -apple-system, \"Segoe UI\", Arial, sans-serif; line-height: 1.6;'>{insights_str}</p>"
                 else: # Plain string without bullets
-                    processed_insights_html = f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
+                    processed_insights_html = f"<p style='margin: 12px 0 0 0; padding: 0; font-size: 15px; color: {COLORS['body_grey']}; font-family: -apple-system, \"Segoe UI\", Arial, sans-serif; line-height: 1.6;'>{insights_str}</p>"
             else: # Handles None, empty string, or empty list for insights
-                 processed_insights_html = "<p style='margin: 10px 0 0 0;'>No analysis available for this article.</p>"
+                processed_insights_html = "<p style='margin: 12px 0 0 0; padding: 0; font-size: 15px; color: " + COLORS['body_grey'] + "; font-family: -apple-system, \"Segoe UI\", Arial, sans-serif; line-height: 1.6;'>No analysis available for this article.</p>"
 
-            # Alternating background for article content cell
-            content_bg_class = 'bg-lightgrey' if i % 2 == 0 else 'bg-white'
+            # Alternating background for article content
+            content_bg = COLORS['card_white'] if i % 2 == 1 else COLORS['background_grey']
             
             html_content += f"""\
-        <!-- Article {i} -->
-        <tr>
-            <td class="article-item">
-                <table class="article-table" cellpadding="0" cellspacing="0" role="presentation">
+                    <!-- Article {i} -->
                     <tr>
-                        <td class="article-accent-cell" style="width: 6px; background-color: #E9041E; font-size: 1px; line-height: 1px;">&nbsp;</td>
-                        <td class="article-content-cell {content_bg_class}">
-                            <p class="article-title">
-                                <a href="{url}" target="_blank">{i}. {title}</a>
+                        <td style="padding: 0 24px 16px 24px;">
+                            <!-- Article card table -->
+                            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; border: 1px solid {COLORS['border_grey']}; border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+                                <tr>
+                                    <!-- Red accent bar -->
+                                    <td width="4" style="width: 4px; background-color: {COLORS['primary_red']}; font-size: 1px; line-height: 1px;">&nbsp;</td>
+                                    <!-- Article content -->
+                                    <td style="padding: 20px; background-color: {content_bg};">
+                                        <!-- Title -->
+                                        <h3 style="margin: 0 0 8px 0; padding: 0;">
+                                            <a href="{url}" target="_blank" style="font-size: 17px; font-weight: bold; color: {COLORS['heading_black']}; text-decoration: none; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.3;">{i}. {title}</a>
+                                        </h3>
+                                        <!-- Meta info -->
+                                        <p style="margin: 0 0 12px 0; padding: 0; font-size: 14px; color: {COLORS['meta_grey']}; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.4;">
+                                            {source} &bull; {pub_time}
+                                        </p>
+                                        <!-- Insights -->
+                                        {processed_insights_html}
+                                        <!-- Read more link -->
+                                        <p style="margin: 12px 0 0 0; padding: 0;">
+                                            <a href="{url}" target="_blank" style="font-size: 14px; font-weight: bold; color: {COLORS['primary_red']}; text-decoration: none; font-family: -apple-system, 'Segoe UI', Arial, sans-serif;">Read Full Article &rarr;</a>
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+            """
+        
+        # Add footer with inline styling
+        html_content += f"""\
+                    <!-- Spacer row before footer -->
+                    <tr>
+                        <td style="height: 16px; font-size: 1px; line-height: 1px;">&nbsp;</td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 24px; border-top: 1px solid {COLORS['border_grey']}; background-color: {COLORS['footer_grey']}; text-align: center;">
+                            <p style="margin: 0 0 12px 0; padding: 0; font-size: 14px; color: {COLORS['footer_text']}; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.5;">
+                                This AI & Fintech News Digest is automatically generated. For a more comprehensive overview, the full report may be available as an attachment.
                             </p>
-                            <p class="article-meta">
-                                {source} &bull; {pub_time}
+                            <p style="margin: 0 0 16px 0; padding: 0; font-size: 14px; color: {COLORS['footer_text']}; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.5;">
+                                For feedback or inquiries, please reply to this email.
                             </p>
-                            <div class="article-insights">
-                                {processed_insights_html}
-                            </div>
-                            <p class="read-more-link" style="margin-top: 12px; margin-bottom: 0;">
-                                <a href="{url}" target="_blank">Read Full Article &rarr;</a>
-                            </p>
+                            <p style="margin: 0; padding: 0; font-size: 13px; color: #9ca3af; font-family: -apple-system, 'Segoe UI', Arial, sans-serif;">&copy; {datetime.now().year} [Your Company Name]. All rights reserved.</p>
                         </td>
                     </tr>
                 </table>
+                <!-- End of main container -->
             </td>
         </tr>
-            """
-        
-        # Add footer with new styling
-        html_content += f"""\
-        <!-- Spacer row before footer -->
-        <tr><td style="height:10px; background-color: #ffffff; font-size: 1px; line-height: 1px;">&nbsp;</td></tr>
-        
-        <!-- Footer -->
-        <tr>
-            <td class="footer">
-                <p>
-                    This AI & Fintech News Digest is automatically generated. For a more comprehensive overview, the full report may be available as an attachment.
-                </p>
-                <p>
-                    For feedback or inquiries, please reply to this email.
-                </p>
-                <p style="margin-top:15px; color: #888888;">&copy; {datetime.now().year} [Your Company Name]. All rights reserved.</p>
-                                </td>
-                            </tr>
-    </table> <!-- End of email-container table -->
+    </table>
+    <!-- End of outer wrapper -->
 </body>
 </html>
 """
