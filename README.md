@@ -7,10 +7,13 @@ A Python-based news aggregation and analysis tool that fetches, analyzes, and su
 ### News Aggregation & Analysis
 - **News Aggregation**: Fetches news articles from Google News with HTML scraping
 - **Content Analysis**: Analyzes article content using keyword matching and LLM-based insights
+- **Source Reliability Scoring**: 3-tier credibility system prioritizes premium news sources (CNN, BBC, NYT, etc.)
 - **Trending Analysis**: Identifies trending topics and calculates article relevance scores
 - **Category-based Filtering**: Organizes articles into categories (AI Development, Fintech, GenAI Usage)
 - **Minimum Category Requirements**: Ensures minimum representation of Fintech articles (at least 3) in top results
+- **Full HTML Conversion**: Extracts entire article HTML and converts to markdown for LLM analysis
 - **Smart Content Extraction**: Handles paywalled content using Playwright with stealth mode
+- **Source Diversity**: Caps articles per source (default: 3) to ensure variety
 - **Automated Summaries**: Generates both brief and detailed summaries of news articles
 - **Email-ready Output**: Creates formatted HTML content ready for email distribution
 
@@ -95,6 +98,37 @@ The script can be configured by modifying the following parameters in `src/confi
 - `USE_LLM`: Enable/disable LLM-based analysis (default: True)
 - `LLM_THRESHOLD`: Score threshold for LLM analysis (default: 0.1)
 - `OUTPUT_DIR`: Directory for output files (default: 'Output')
+
+### Source Reliability Configuration
+- `SOURCE_RELIABILITY_TIER_1`: List of premium news sources (CNN, BBC, NYT, etc.)
+- `SOURCE_RELIABILITY_TIER_2`: List of established industry outlets (TechCrunch, Forbes, etc.)
+- `TIER_1_MULTIPLIER`: Score boost for tier-1 sources (default: 1.3)
+- `TIER_2_MULTIPLIER`: Score boost for tier-2 sources (default: 1.1)
+- `TIER_3_MULTIPLIER`: Score baseline for unranked sources (default: 1.0)
+- `SCORE_WEIGHT_KEYWORD`: Weight for keyword relevance (default: 0.5 = 50%)
+- `SCORE_WEIGHT_TRENDING`: Weight for trending score (default: 0.3 = 30%)
+- `SCORE_WEIGHT_SOURCE`: Weight for source reliability (default: 0.2 = 20%)
+- `MAX_ARTICLES_PER_SOURCE`: Maximum articles per source in results (default: 3)
+- `MAX_MARKDOWN_LENGTH`: Maximum markdown length for LLM (default: 400,000 characters)
+
+**Example: Adding a new tier-1 source**
+```python
+# In src/config.py
+SOURCE_RELIABILITY_TIER_1 = [
+    'cnn.com', 'bbc.com', 'nytimes.com',
+    'economist.com'  # Add new source here
+]
+```
+
+**Example: Adjusting scoring weights**
+```python
+# More emphasis on source reliability
+SCORE_WEIGHT_KEYWORD = 0.4  # 40%
+SCORE_WEIGHT_TRENDING = 0.3  # 30%
+SCORE_WEIGHT_SOURCE = 0.3   # 30%
+```
+
+**See [Source Reliability Configuration Guide](docs/SOURCE_RELIABILITY_CONFIG.md) for detailed documentation.**
 
 ### Anti-Blocking Configuration
 - `MAX_RETRY_ATTEMPTS`: Maximum retry attempts for blocked requests (default: 5)
