@@ -12,26 +12,49 @@ from PIL import Image
 from io import BytesIO
 from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from src.config import OPENAI_API_KEY, OPENAI_API_BASE, AZURE_DEPLOYMENT_NAME, AZURE_API_VERSION, OUTPUT_DIR
+from src.config import (
+    OPENAI_API_KEY,
+    OPENAI_API_BASE,
+    AZURE_DEPLOYMENT_NAME,
+    AZURE_API_VERSION,
+    OUTPUT_DIR,
+)
 from src.config import INCLUDE_DEGRADATION_WARNING
-from src.models import ArticleAnalysis, TrendAnalysis, BriefSummary, DetailedReport, DegradationStatus
+from src.models import (
+    ArticleAnalysis,
+    TrendAnalysis,
+    BriefSummary,
+    DetailedReport,
+    DegradationStatus,
+)
 from urllib.parse import urljoin
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+
 class DocumentGenerator:
-    def __init__(self, output_dir=OUTPUT_DIR, llm_instance: Optional[AzureChatOpenAI] = None):
+    def __init__(
+        self, output_dir=OUTPUT_DIR, llm_instance: Optional[AzureChatOpenAI] = None
+    ):
         self.output_dir = output_dir
         self.llm = llm_instance
         os.makedirs(self.output_dir, exist_ok=True)
-        self.summary_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an expert news analyst. Synthesize the key themes and most significant developments from the provided list of recent news article titles and their insights."),
-            ("user", "Please provide a concise overall summary (3-4 sentences) based on the following articles:\n\n{article_summaries}\n\nOverall Summary:")
-        ])
+        self.summary_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an expert news analyst. Synthesize the key themes and most significant developments from the provided list of recent news article titles and their insights.",
+                ),
+                (
+                    "user",
+                    "Please provide a concise overall summary (3-4 sentences) based on the following articles:\n\n{article_summaries}\n\nOverall Summary:",
+                ),
+            ]
+        )
         if self.llm:
             self.summary_chain = self.summary_prompt | self.llm
         else:
-             self.summary_chain = None
+            self.summary_chain = None
 
     def _set_doc_margins(self, document):
         sections = document.sections
@@ -41,11 +64,13 @@ class DocumentGenerator:
             section.left_margin = Inches(1)
             section.right_margin = Inches(1)
 
-    def _add_styled_paragraph(self, document, text, size=11, bold=False, alignment=WD_PARAGRAPH_ALIGNMENT.LEFT):
+    def _add_styled_paragraph(
+        self, document, text, size=11, bold=False, alignment=WD_PARAGRAPH_ALIGNMENT.LEFT
+    ):
         paragraph = document.add_paragraph()
         paragraph.alignment = alignment
         run = paragraph.add_run(text)
-        run.font.name = 'Calibri'
+        run.font.name = "Calibri"
         run.font.size = Pt(size)
         run.bold = bold
         paragraph.paragraph_format.space_after = Pt(6)
@@ -60,10 +85,10 @@ class DocumentGenerator:
         # Prepare the input for the LLM
         summary_input = []
         for item in top_articles:
-            title = item.get('article', {}).get('title', 'No Title')
-            insight = item.get('analysis', {}).get('insights', 'N/A')
+            title = item.get("article", {}).get("title", "No Title")
+            insight = item.get("analysis", {}).get("insights", "N/A")
             # Ensure insight is a string, handling None or potential non-string types
-            insight_str = str(insight) if insight else 'N/A'
+            insight_str = str(insight) if insight else "N/A"
             summary_input.append(f"Title: {title}\nInsight: {insight_str}\n---")
 
         if not summary_input:
@@ -80,21 +105,42 @@ class DocumentGenerator:
             print(f"Error generating overall summary with LLM: {e}")
             return f"Overall summary could not be generated due to an error: {e}"
 
-    def generate_brief_summary(self, top_articles: List[Dict], degradation_status: Optional[DegradationStatus] = None):
+    def generate_brief_summary(
+        self,
+        top_articles: List[Dict],
+        degradation_status: Optional[DegradationStatus] = None,
+    ):
         """Generates a brief Word document summary (e.g., top 3 articles)."""
         document = Document()
         self._set_doc_margins(document)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"brief_news_summary_{timestamp}.docx"
         filepath = os.path.join(self.output_dir, filename)
 
-        self._add_styled_paragraph(document, "Brief News Summary", size=16, bold=True, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
-        self._add_styled_paragraph(document, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", size=10, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
-        
+        self._add_styled_paragraph(
+            document,
+            "Brief News Summary",
+            size=16,
+            bold=True,
+            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
+        )
+        self._add_styled_paragraph(
+            document,
+            f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            size=10,
+            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
+        )
+
         # Add degradation warning if applicable (Phase 5)
-        if INCLUDE_DEGRADATION_WARNING and degradation_status and degradation_status.is_degraded:
+        if (
+            INCLUDE_DEGRADATION_WARNING
+            and degradation_status
+            and degradation_status.is_degraded
+        ):
             document.add_paragraph()
-            self._add_styled_paragraph(document, "⚠️ DEGRADATION WARNING", size=12, bold=True)
+            self._add_styled_paragraph(
+                document, "[WARN] DEGRADATION WARNING", size=12, bold=True
+            )
             warning_text = (
                 f"This report was generated under degraded conditions due to sustained blocking/errors.\n"
                 f"Success Rate: {degradation_status.success_rate:.1%} | "
@@ -105,7 +151,7 @@ class DocumentGenerator:
             if degradation_status.warnings:
                 for warning in degradation_status.warnings[:3]:  # Show top 3 warnings
                     self._add_styled_paragraph(document, f"  • {warning}", size=9)
-        
+
         document.add_paragraph()
 
         # Add overall summary at the top
@@ -116,25 +162,35 @@ class DocumentGenerator:
 
         # Include only the top 3 articles for the brief summary
         for i, item in enumerate(top_articles[:3], 1):
-            article = item.get('article', {})
-            analysis = item.get('analysis', {})
-            title = article.get('title', 'No Title Provided')
-            source = article.get('source', 'Unknown Source')
-            pub_time_str = article.get('published_time', 'Unknown Time')
-            url = article.get('url', '#')
-            
+            article = item.get("article", {})
+            analysis = item.get("analysis", {})
+            title = article.get("title", "No Title Provided")
+            source = article.get("source", "Unknown Source")
+            pub_time_str = article.get("published_time", "Unknown Time")
+            url = article.get("url", "#")
+
             try:
-                pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
+                pub_time = (
+                    datetime.fromisoformat(
+                        pub_time_str.replace("Z", "+00:00")
+                    ).strftime("%Y-%m-%d %H:%M")
+                    if pub_time_str != "Unknown Time"
+                    else pub_time_str
+                )
             except:
                 pub_time = pub_time_str
 
-            insights = analysis.get('insights', 'No analysis available.')
-            insights_str = str(insights) if insights else 'No analysis available.'
+            insights = analysis.get("insights", "No analysis available.")
+            insights_str = str(insights) if insights else "No analysis available."
 
             # Add content as styled paragraphs
             self._add_styled_paragraph(document, f"{i}. {title}", size=12, bold=True)
-            self._add_styled_paragraph(document, f"   Source: {source} | Published: {pub_time}", size=10)
-            self._add_styled_paragraph(document, f"   Analysis: {insights_str}", size=11)
+            self._add_styled_paragraph(
+                document, f"   Source: {source} | Published: {pub_time}", size=10
+            )
+            self._add_styled_paragraph(
+                document, f"   Analysis: {insights_str}", size=11
+            )
             p = self._add_styled_paragraph(document, f"   Link: ", size=10)
             p.add_run(url).font.size = Pt(10)
 
@@ -144,22 +200,43 @@ class DocumentGenerator:
         document.save(filepath)
         return filepath
 
-    def generate_detailed_report(self, top_articles: List[Dict], degradation_status: Optional[DegradationStatus] = None):
+    def generate_detailed_report(
+        self,
+        top_articles: List[Dict],
+        degradation_status: Optional[DegradationStatus] = None,
+    ):
         """Generates a detailed Word document report including a table of contents."""
         document = Document()
         self._set_doc_margins(document)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"detailed_news_report_{timestamp}.docx"
         filepath = os.path.join(self.output_dir, filename)
 
         # Add title
-        self._add_styled_paragraph(document, "Detailed News Report", size=16, bold=True, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
-        self._add_styled_paragraph(document, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", size=10, alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
-        
+        self._add_styled_paragraph(
+            document,
+            "Detailed News Report",
+            size=16,
+            bold=True,
+            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
+        )
+        self._add_styled_paragraph(
+            document,
+            f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            size=10,
+            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
+        )
+
         # Add degradation warning if applicable (Phase 5)
-        if INCLUDE_DEGRADATION_WARNING and degradation_status and degradation_status.is_degraded:
+        if (
+            INCLUDE_DEGRADATION_WARNING
+            and degradation_status
+            and degradation_status.is_degraded
+        ):
             document.add_paragraph()
-            self._add_styled_paragraph(document, "⚠️ DEGRADATION WARNING", size=12, bold=True)
+            self._add_styled_paragraph(
+                document, "[WARN] DEGRADATION WARNING", size=12, bold=True
+            )
             warning_text = (
                 f"This report was generated under degraded conditions due to sustained blocking/errors.\n"
                 f"Success Rate: {degradation_status.success_rate:.1%} | "
@@ -168,46 +245,66 @@ class DocumentGenerator:
             )
             self._add_styled_paragraph(document, warning_text, size=10)
             if degradation_status.warnings:
-                for warning in degradation_status.warnings[:5]:  # Show top 5 warnings in detailed report
+                for warning in degradation_status.warnings[
+                    :5
+                ]:  # Show top 5 warnings in detailed report
                     self._add_styled_paragraph(document, f"  • {warning}", size=9)
-        
+
         document.add_paragraph()
 
         # Add Table of Contents
         self._add_styled_paragraph(document, "Table of Contents", size=14, bold=True)
         for i, item in enumerate(top_articles, 1):
-            title = item.get('article', {}).get('title', 'No Title Provided')
-            toc_paragraph = self._add_styled_paragraph(document, f"{i}. {title}", size=11)
+            title = item.get("article", {}).get("title", "No Title Provided")
+            toc_paragraph = self._add_styled_paragraph(
+                document, f"{i}. {title}", size=11
+            )
             toc_paragraph.paragraph_format.left_indent = Inches(0.25)
         document.add_paragraph()  # Add spacing after TOC
 
         # Add the fixed introductory lines
-        self._add_styled_paragraph(document, "The following are the top news items for review.", size=11)
-        self._add_styled_paragraph(document, "For more detailed analysis of each article, please refer to the individual insights provided below or the source links.", size=11)
+        self._add_styled_paragraph(
+            document, "The following are the top news items for review.", size=11
+        )
+        self._add_styled_paragraph(
+            document,
+            "For more detailed analysis of each article, please refer to the individual insights provided below or the source links.",
+            size=11,
+        )
         document.add_paragraph()
 
         # Add detailed articles
         self._add_styled_paragraph(document, "Top News Details", size=14, bold=True)
 
         for i, item in enumerate(top_articles, 1):
-            article = item.get('article', {})
-            analysis = item.get('analysis', {})
-            title = article.get('title', 'No Title Provided')
-            source = article.get('source', 'Unknown Source')
-            pub_time_str = article.get('published_time', 'Unknown Time')
-            url = article.get('url', '#')
+            article = item.get("article", {})
+            analysis = item.get("analysis", {})
+            title = article.get("title", "No Title Provided")
+            source = article.get("source", "Unknown Source")
+            pub_time_str = article.get("published_time", "Unknown Time")
+            url = article.get("url", "#")
 
             try:
-                pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M') if pub_time_str != 'Unknown Time' else pub_time_str
+                pub_time = (
+                    datetime.fromisoformat(
+                        pub_time_str.replace("Z", "+00:00")
+                    ).strftime("%Y-%m-%d %H:%M")
+                    if pub_time_str != "Unknown Time"
+                    else pub_time_str
+                )
             except:
                 pub_time = pub_time_str
 
-            insights = analysis.get('insights', 'No analysis available.')
-            insights_str = str(insights) if insights else 'No analysis available.'
+            insights = analysis.get("insights", "No analysis available.")
+            insights_str = str(insights) if insights else "No analysis available."
 
             self._add_styled_paragraph(document, f"{i}. {title}", size=12, bold=True)
-            self._add_styled_paragraph(document, f"   Source: {source} | Published: {pub_time}", size=10)
-            self._add_styled_paragraph(document, f"   Analysis: {insights_str}", size=11)
+            self._add_styled_paragraph(
+                document, f"   Source: {source} | Published: {pub_time}", size=10
+            )
+            self._add_styled_paragraph(
+                document, f"   Analysis: {insights_str}", size=11
+            )
             p = self._add_styled_paragraph(document, f"   Link: ", size=10)
             p.add_run(url).font.size = Pt(10)
             document.add_paragraph()
@@ -215,12 +312,18 @@ class DocumentGenerator:
         document.save(filepath)
         return filepath
 
-    def generate_email_content(self, top_articles: List[Dict], degradation_status: Optional[DegradationStatus] = None) -> str:
+    def generate_email_content(
+        self,
+        top_articles: List[Dict],
+        degradation_status: Optional[DegradationStatus] = None,
+    ) -> str:
         """Generates HTML content ready for copying into Outlook email."""
-        
+
         # Generate timestamp for the email header
-        timestamp = datetime.now().strftime('%A, %B %d, %Y') # e.g., Monday, June 10, 2024
-        
+        timestamp = datetime.now().strftime(
+            "%A, %B %d, %Y"
+        )  # e.g., Monday, June 10, 2024
+
         # Start building HTML content with email-client-friendly styling
         # Using CSS classes and a <style> block for better organization and some responsiveness
         html_content = f"""\
@@ -409,13 +512,17 @@ class DocumentGenerator:
                     in artificial intelligence and financial technology from the past 24 hours.
                     Click on any article title to read the full story.
                 </p>"""
-        
+
         # Add degradation warning to email (Phase 5)
-        if INCLUDE_DEGRADATION_WARNING and degradation_status and degradation_status.is_degraded:
+        if (
+            INCLUDE_DEGRADATION_WARNING
+            and degradation_status
+            and degradation_status.is_degraded
+        ):
             html_content += f"""
                 <div style="margin-top: 15px; padding: 15px; background-color: #fff3cd; border-left: 4px solid #ffc107;">
                     <p style="margin: 0; color: #856404; font-weight: bold; font-size: 11pt;">
-                        ⚠️ DEGRADATION WARNING
+                        [WARN] DEGRADATION WARNING
                     </p>
                     <p style="margin: 5px 0 0 0; color: #856404; font-size: 10pt;">
                         This report was generated under degraded conditions due to sustained blocking/errors.<br>
@@ -424,7 +531,7 @@ class DocumentGenerator:
                         Collected Results: {degradation_status.collected_results_count if degradation_status.collected_results_count > 0 else len(top_articles)} articles
                     </p>
                 </div>"""
-        
+
         html_content += """
                         </p>
                     </td>
@@ -440,48 +547,76 @@ class DocumentGenerator:
                     </td>
                 </tr>
         """
-        
+
         # Add top 3 articles with new styling
         for i, item in enumerate(top_articles[:3], 1):
-            article = item.get('article', {})
-            analysis = item.get('analysis', {})
-            
-            title = article.get('title', 'No Title Provided')
-            source = article.get('source', 'Unknown Source')
-            pub_time_str = article.get('published_time', 'Unknown Time')
-            url = article.get('url', '#')
-            
+            article = item.get("article", {})
+            analysis = item.get("analysis", {})
+
+            title = article.get("title", "No Title Provided")
+            source = article.get("source", "Unknown Source")
+            pub_time_str = article.get("published_time", "Unknown Time")
+            url = article.get("url", "#")
+
             try:
-                pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).strftime('%I:%M %p') if pub_time_str != 'Unknown Time' else pub_time_str
+                pub_time = (
+                    datetime.fromisoformat(
+                        pub_time_str.replace("Z", "+00:00")
+                    ).strftime("%I:%M %p")
+                    if pub_time_str != "Unknown Time"
+                    else pub_time_str
+                )
             except:
-                pub_time = pub_time_str # Fallback to original string if parsing fails
-            
-            insights = analysis.get('insights', None) # Get None to better distinguish from "No analysis" string
-            
+                pub_time = pub_time_str  # Fallback to original string if parsing fails
+
+            insights = analysis.get(
+                "insights", None
+            )  # Get None to better distinguish from "No analysis" string
+
             processed_insights_html = ""
             if isinstance(insights, list) and insights:
                 # Filter out empty strings from list before joining
-                valid_insights = [str(insight).strip() for insight in insights if str(insight).strip()]
+                valid_insights = [
+                    str(insight).strip() for insight in insights if str(insight).strip()
+                ]
                 if valid_insights:
-                    processed_insights_html = "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>" + "".join(f"<li style='margin-bottom: 6px;'>{insight}</li>" for insight in valid_insights) + "</ul>"
+                    processed_insights_html = (
+                        "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>"
+                        + "".join(
+                            f"<li style='margin-bottom: 6px;'>{insight}</li>"
+                            for insight in valid_insights
+                        )
+                        + "</ul>"
+                    )
                 else:
                     processed_insights_html = "<p style='margin: 10px 0 0 0;'>No specific insights provided.</p>"
             elif isinstance(insights, str) and insights.strip():
                 insights_str = insights.strip()
-                if '•' in insights_str: # Check if string contains bullet points
-                    points = [p.strip() for p in insights_str.split('•') if p.strip()]
+                if "•" in insights_str:  # Check if string contains bullet points
+                    points = [p.strip() for p in insights_str.split("•") if p.strip()]
                     if points:
-                         processed_insights_html = "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>" + "".join(f"<li style='margin-bottom: 6px;'>{point}</li>" for point in points) + "</ul>"
-                    else: # String had '•' but resulted in no points
-                        processed_insights_html = f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
-                else: # Plain string without bullets
-                    processed_insights_html = f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
-            else: # Handles None, empty string, or empty list for insights
-                 processed_insights_html = "<p style='margin: 10px 0 0 0;'>No analysis available for this article.</p>"
+                        processed_insights_html = (
+                            "<ul style='margin: 10px 0 0 0; padding-left: 20px;'>"
+                            + "".join(
+                                f"<li style='margin-bottom: 6px;'>{point}</li>"
+                                for point in points
+                            )
+                            + "</ul>"
+                        )
+                    else:  # String had '•' but resulted in no points
+                        processed_insights_html = (
+                            f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
+                        )
+                else:  # Plain string without bullets
+                    processed_insights_html = (
+                        f"<p style='margin: 10px 0 0 0;'>{insights_str}</p>"
+                    )
+            else:  # Handles None, empty string, or empty list for insights
+                processed_insights_html = "<p style='margin: 10px 0 0 0;'>No analysis available for this article.</p>"
 
             # Alternating background for article content cell
-            content_bg_class = 'bg-lightgrey' if i % 2 == 0 else 'bg-white'
-            
+            content_bg_class = "bg-lightgrey" if i % 2 == 0 else "bg-white"
+
             html_content += f"""\
         <!-- Article {i} -->
         <tr>
@@ -508,7 +643,7 @@ class DocumentGenerator:
             </td>
         </tr>
             """
-        
+
         # Add footer with new styling
         html_content += f"""\
         <!-- Spacer row before footer -->
@@ -530,13 +665,13 @@ class DocumentGenerator:
 </body>
 </html>
 """
-        
+
         # Save the HTML content to a file for backup/review
-        timestamp_file = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp_file = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"email_content_{timestamp_file}.html"
         filepath = os.path.join(self.output_dir, filename)
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
+
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(html_content)
-            
-        return html_content 
+
+        return html_content

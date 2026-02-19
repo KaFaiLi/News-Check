@@ -14,18 +14,18 @@ class TestBlockDetector:
         """Test rate limit detection (HTTP 429)."""
         response = Mock()
         response.status_code = 429
-        
+
         block_type = BlockDetector.detect_block_type(response=response)
-        
+
         assert block_type == BlockType.RATE_LIMIT
 
     def test_forbidden_detection_403(self):
         """Test forbidden detection (HTTP 403)."""
         response = Mock()
         response.status_code = 403
-        
+
         block_type = BlockDetector.detect_block_type(response=response)
-        
+
         assert block_type == BlockType.FORBIDDEN
 
     def test_captcha_detection_html_content(self):
@@ -33,9 +33,11 @@ class TestBlockDetector:
         response = Mock()
         response.status_code = 200
         response.text = "<html><body><div class='g-recaptcha'>Please verify you are human</div></body></html>"
-        
-        block_type = BlockDetector.detect_block_type(response=response, html_content=response.text)
-        
+
+        block_type = BlockDetector.detect_block_type(
+            response=response, html_content=response.text
+        )
+
         assert block_type == BlockType.CAPTCHA
 
     def test_captcha_detection_case_insensitive(self):
@@ -43,25 +45,41 @@ class TestBlockDetector:
         response = Mock()
         response.status_code = 200
         response.text = "<html><body>CAPTCHA Required</body></html>"
-        
-        block_type = BlockDetector.detect_block_type(response=response, html_content=response.text)
-        
+
+        block_type = BlockDetector.detect_block_type(
+            response=response, html_content=response.text
+        )
+
         assert block_type == BlockType.CAPTCHA
+
+    def test_soft_block_detection(self):
+        """Test soft block detection for consent/cookie walls."""
+        response = Mock()
+        response.status_code = 200
+        response.text = (
+            "<html><body>Please enable JavaScript and accept cookies</body></html>"
+        )
+
+        block_type = BlockDetector.detect_block_type(
+            response=response, html_content=response.text
+        )
+
+        assert block_type == BlockType.SOFT_BLOCK
 
     def test_timeout_detection_timeout_exception(self):
         """Test timeout detection (Timeout exception)."""
         exception = Timeout("Request timed out")
-        
+
         block_type = BlockDetector.detect_block_type(exception=exception)
-        
+
         assert block_type == BlockType.TIMEOUT
 
     def test_connection_error_detection(self):
         """Test connection error detection (ConnectionError exception)."""
         exception = ConnectionError("Connection refused")
-        
+
         block_type = BlockDetector.detect_block_type(exception=exception)
-        
+
         assert block_type == BlockType.CONNECTION_ERROR
 
     def test_server_error_detection_5xx(self):
@@ -69,28 +87,32 @@ class TestBlockDetector:
         for status_code in [500, 502, 503, 504]:
             response = Mock()
             response.status_code = status_code
-            
+
             block_type = BlockDetector.detect_block_type(response=response)
-            
-            assert block_type == BlockType.SERVER_ERROR, f"Status {status_code} should be SERVER_ERROR"
+
+            assert block_type == BlockType.SERVER_ERROR, (
+                f"Status {status_code} should be SERVER_ERROR"
+            )
 
     def test_non_retryable_detection_404(self):
         """Test non-retryable detection (404, 410, 401)."""
         for status_code in [404, 410, 401]:
             response = Mock()
             response.status_code = status_code
-            
+
             block_type = BlockDetector.detect_block_type(response=response)
-            
-            assert block_type == BlockType.NON_RETRYABLE, f"Status {status_code} should be NON_RETRYABLE"
+
+            assert block_type == BlockType.NON_RETRYABLE, (
+                f"Status {status_code} should be NON_RETRYABLE"
+            )
 
     def test_detect_block_type_returns_correct_enum(self):
         """Test detect_block_type() returns correct BlockType enum."""
         response = Mock()
         response.status_code = 429
-        
+
         result = BlockDetector.detect_block_type(response=response)
-        
+
         assert isinstance(result, BlockType)
         assert result.value == "rate_limit"
 
@@ -125,15 +147,15 @@ class TestBlockDetector:
         response = Mock()
         response.status_code = 200
         response.text = ""
-        
+
         block_type = BlockDetector.detect_block_type(response=response, html_content="")
-        
+
         assert block_type == BlockType.INVALID_HTML
 
     def test_none_response_and_exception_returns_none(self):
         """Test None response and exception returns None (no block detected)."""
         block_type = BlockDetector.detect_block_type(response=None, exception=None)
-        
+
         assert block_type is None
 
     def test_normal_200_response_returns_none(self):
@@ -141,7 +163,9 @@ class TestBlockDetector:
         response = Mock()
         response.status_code = 200
         response.text = "<html><body><h1>Normal Page</h1></body></html>"
-        
-        block_type = BlockDetector.detect_block_type(response=response, html_content=response.text)
-        
+
+        block_type = BlockDetector.detect_block_type(
+            response=response, html_content=response.text
+        )
+
         assert block_type is None
