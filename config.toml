@@ -1,0 +1,113 @@
+# News-Check — Monthly AI Digest configuration
+# Edit this file before running `uv run python -m src`.
+# Secrets (Azure OpenAI keys) live in .env, never here.
+
+[run]
+# Date window the digest covers. If both fields are commented out, the
+# pipeline defaults to the previous calendar month relative to today.
+# date_from = "2026-04-01"
+# date_to   = "2026-04-30"
+
+# How many candidate URLs to gather per topic before ranking.
+candidates_per_topic = 50
+
+[topics]
+# Each list is a set of search queries fed to Google News for that topic.
+# More queries = broader coverage but more candidates to extract.
+ai = [
+    "artificial intelligence breakthrough",
+    "large language model",
+    "AI research",
+    "OpenAI",
+    "Anthropic",
+    "Google DeepMind",
+]
+ai_banking = [
+    "AI banking",
+    "AI in finance",
+    "generative AI bank",
+    "AI fintech",
+    "AI investment banking",
+    "AI wealth management",
+]
+ai_agents = [
+    "AI agents",
+    "agentic AI",
+    "autonomous AI agents",
+    "AI agent enterprise",
+]
+
+[selection]
+top_n                       = 10
+ai_banking_minimum_floor    = 3
+max_articles_per_source     = 3
+
+[scoring]
+weight_topic_relevance        = 0.2
+weight_cross_source_consensus = 0.2
+weight_source_tier            = 0.3
+weight_recency                = 0.3
+
+[sources]
+tier_1 = [
+    "ft.com",
+    "bloomberg.com",
+    "reuters.com",
+    "wsj.com",
+    "nytimes.com",
+    "economist.com",
+    "bbc.com",
+    "cnn.com",
+    "ap.org",
+    "apnews.com",
+]
+tier_2 = [
+    "techcrunch.com",
+    "forbes.com",
+    "cnbc.com",
+    "businessinsider.com",
+    "wired.com",
+    "theverge.com",
+    "axios.com",
+    "fortune.com",
+    "venturebeat.com",
+]
+tier_1_multiplier = 1.4
+tier_2_multiplier = 1.15
+tier_3_multiplier = 1.0
+
+[anti_blocking]
+max_retry_attempts      = 5
+initial_backoff_delay   = 1
+max_backoff_delay       = 60
+random_delay_range      = [1, 5]
+# When a request is being throttled, after this many consecutive failures
+# the pipeline switches to degraded mode and emits a warning to outputs.
+max_consecutive_failures = 3
+
+[parallelism]
+# Concurrent Google News query scrapes. Each worker is an independent
+# Playwright Edge browser context, so identities don't leak across queries.
+# Higher values speed up discovery but raise the chance of Google rate-limiting.
+discovery_workers = 4
+# Concurrent article fetches. Same caveat — too high and publishers throttle.
+# Per-source cap (`selection.max_articles_per_source`) keeps any one domain
+# from being hammered, but parallelism still increases overall request rate.
+extraction_workers = 4
+# Concurrent Azure OpenAI insight calls. The synthesis call after insights
+# remains sequential.
+analysis_workers = 3
+
+[output]
+output_dir                  = "Output"
+company_name                = "[Your Company Name]"
+include_degradation_warning = true
+max_markdown_length         = 400000
+
+[llm]
+# Temperature is kept low for deterministic IB-grade analysis.
+temperature      = 0.2
+# Per-article insight prompt is bounded to avoid blowing the context window
+# on long articles. The article body is truncated to this many characters
+# before being passed to the model.
+max_article_chars = 60000
