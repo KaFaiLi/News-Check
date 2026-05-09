@@ -1,6 +1,6 @@
 """Entry point: `uv run python -m src`.
 
-Loads config + secrets, runs the LangGraph pipeline, prints a final
+Loads config + secrets, runs the digest pipeline, prints a final
 summary of generated artifacts.
 """
 

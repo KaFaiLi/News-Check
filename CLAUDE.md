@@ -18,7 +18,7 @@ The key efficiency choice is **rank-then-stream-fetch**: only ~10–15 articles 
 
 - **Package management: `uv` only.** Dependencies live in `pyproject.toml`. Use `uv add <pkg>`, `uv sync`, `uv run <cmd>`. Never bring back `requirements.txt` or bare `pip`.
 - **Web fetching: Playwright with `channel="msedge"` only.** No `requests`, no `httpx`, no plain Chromium. The browser is wrapped by `src/extraction/browser.py:EdgeBrowser`, which already handles stealth, UA rotation, viewport/locale/timezone spoofing — extend that, don't bypass it.
-- **LLM stack: LangChain + LangGraph + Azure OpenAI only.** All model calls flow through `src/analysis/llm.py:build_chat_model` (returns `AzureChatOpenAI`). No direct `openai` SDK calls, no other providers.
+- **LLM stack: LangChain (langchain-core + langchain-openai) + Azure OpenAI only.** All model calls flow through `src/analysis/llm.py:build_chat_model` (returns `AzureChatOpenAI`). No direct `openai` SDK calls, no other providers. The pipeline orchestration is plain Python — langgraph was removed.
 - **Run-time tunables live in `config.toml`.** Secrets (Azure keys/endpoint/deployment/api-version) live in `.env`. The two are loaded by `src/config.py:load_settings`. CLI flags are intentionally not used.
 
 If a request would violate one of these, stop and confirm before proceeding.
@@ -48,8 +48,7 @@ src/
     parallel_insights.py  ThreadPoolExecutor over selected articles for concurrent LLM calls
     synthesis.py          cross-article monthly themes paragraph (sequential)
   pipeline/
-    state.py              PipelineState TypedDict
-    graph.py              LangGraph: discover → rank → fetch_select → analyze → render
+    graph.py              plain-Python orchestration: discover → rank → fetch_select → analyze → render
   anti_blocking/
     block_detector.py     classify 403/429/CAPTCHA/timeout/empty-body
     retry_policy.py       run_with_retry — exponential backoff, UA rotation, classification-driven
@@ -60,7 +59,7 @@ config.toml               run-time tunables (date range, queries, weights, tiers
 .env (gitignored)         AZURE_OPENAI_API_KEY / ENDPOINT / DEPLOYMENT / API_VERSION
 ```
 
-The whole pipeline is assembled by `src/pipeline/graph.py:build_pipeline`. Each node accepts `PipelineState` and returns a partial update; failures within a node are recorded into `degradation` rather than raised, so a partial run still produces output with a warning banner.
+The whole pipeline is invoked via `src/pipeline/graph.py:run_pipeline`, which calls each phase function (`discover` → `rank` → `fetch_select` → `analyze` → `render`) in sequence and threads a shared `BrowserPool`, `SessionLogger`, and `DegradationStatus` through them. Failures inside a phase are recorded into `degradation` rather than raised, so a partial run still produces output with a warning banner.
 
 ## What is locked vs. open to change
 
@@ -93,7 +92,7 @@ Test config lives in `pytest.ini` (coverage on by default — pass `--no-cov` fo
 - New publisher tier or boost → `config.toml` `[sources]`. Tier lookup is `src/discovery/publishers.py:classify_tier`.
 - New anti-bot tactic → `src/extraction/browser.py` (stealth init script + context options) or `src/anti_blocking/retry_policy.py` (backoff/rotation behaviour).
 - New prompt or prompt change → `src/analysis/insights.py` for per-article, `src/analysis/synthesis.py` for cross-article. Keep the system prompt static (prompt-cache friendly).
-- New output column / artifact → extend `src/document_generator.py` and update the matching renderer call in `src/pipeline/graph.py:render_node`.
+- New output column / artifact → extend `src/document_generator.py` and update the matching renderer call in `src/pipeline/graph.py:render`.
 
 ## Things easy to get wrong here
 

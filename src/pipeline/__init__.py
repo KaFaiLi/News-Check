@@ -1,6 +1,5 @@
-"""LangGraph pipeline: discover → extract → rank → analyze → render."""
+"""Pipeline orchestration: discover → rank → fetch_select → analyze → render."""
 
-from src.pipeline.graph import build_pipeline, run_pipeline
-from src.pipeline.state import PipelineState
+from src.pipeline.graph import run_pipeline
 
-__all__ = ["build_pipeline", "run_pipeline", "PipelineState"]
+__all__ = ["run_pipeline"]

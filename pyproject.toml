@@ -5,10 +5,8 @@ description = "Monthly AI digest for investment banking — Google News discover
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "langchain>=0.3.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
-    "langgraph>=0.2.0",
     "playwright>=1.49.0",
     "trafilatura>=1.12.0",
     "html2text>=2024.2.26",
