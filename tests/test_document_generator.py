@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import re
-
 from src.document_generator import DocumentGenerator
-from src.models import DegradationStatus
 
 
 def _sample_articles() -> list[dict]:
@@ -94,28 +91,10 @@ def test_detailed_report_uses_monthly_copy(tmp_path):
     assert "past 24 hours" not in body
 
 
-def test_detailed_report_uses_precomputed_summary(tmp_path):
-    """Synthesis from the pipeline lands in the 'Monthly Themes' section
-    of the detailed report — never re-calls the LLM."""
-    from docx import Document
-
-    gen = DocumentGenerator(
-        output_dir=str(tmp_path),
-        month_label="April 2026",
-        company_name="Acme Bank",
-        # No `llm_instance` passed — if it tried to call one, it would fail.
-    )
-    path = gen.generate_detailed_report(
-        _sample_articles(),
-        precomputed_summary="MAGIC SYNTHESIS TOKEN",
-    )
-    doc = Document(path)
-    body = "\n".join(p.text for p in doc.paragraphs)
-    assert "MAGIC SYNTHESIS TOKEN" in body
-    assert "Monthly Themes" in body
-
-
-def test_detailed_report_omits_themes_when_no_summary(tmp_path):
+def test_detailed_report_omits_monthly_themes(tmp_path):
+    """The 'Monthly Themes' section was removed; degradation warnings are
+    no longer surfaced in user-facing reports either — only printed to
+    stdout. The docx should render without those sections."""
     from docx import Document
 
     gen = DocumentGenerator(
@@ -126,41 +105,20 @@ def test_detailed_report_omits_themes_when_no_summary(tmp_path):
     path = gen.generate_detailed_report(_sample_articles())
     doc = Document(path)
     body = "\n".join(p.text for p in doc.paragraphs)
-    # Without a precomputed summary AND no llm_instance, _generate_overall_summary
-    # returns the "could not be generated" sentence; we still render it as a
-    # themes section. We assert the section doesn't crash the doc.
+    assert "Monthly Themes" not in body
+    assert "DEGRADATION WARNING" not in body
+    # The body still produces correctly so the rest of the doc is intact.
     assert "AI Monthly Digest — Full Report" in body
 
 
-def test_degradation_warning_renders_in_email(tmp_path):
-    deg = DegradationStatus(
-        is_degraded=True,
-        total_attempts=10,
-        failed_attempts=4,
-        collected_results_count=6,
-        warnings=["Source X blocked us repeatedly."],
-    )
+def test_email_omits_degradation_warning(tmp_path):
+    """Degradation warnings are no longer rendered in the email body."""
     gen = DocumentGenerator(
         output_dir=str(tmp_path),
         month_label="April 2026",
         company_name="Acme",
-        include_degradation_warning=True,
     )
-    path = gen.generate_email_content(_sample_articles(), degradation_status=deg)
-    html = open(path, encoding="utf-8").read()
-    assert "DEGRADATION WARNING" in html
-    assert re.search(r"Success Rate:\s*60", html)
-
-
-def test_degradation_warning_suppressed_when_flag_off(tmp_path):
-    deg = DegradationStatus(is_degraded=True, total_attempts=10, failed_attempts=4)
-    gen = DocumentGenerator(
-        output_dir=str(tmp_path),
-        month_label="April 2026",
-        company_name="Acme",
-        include_degradation_warning=False,
-    )
-    path = gen.generate_email_content(_sample_articles(), degradation_status=deg)
+    path = gen.generate_email_content(_sample_articles())
     html = open(path, encoding="utf-8").read()
     assert "DEGRADATION WARNING" not in html
 

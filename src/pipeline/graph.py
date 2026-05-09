@@ -8,11 +8,7 @@ rather than raised, so a partial run still reaches `render`.
 
 from __future__ import annotations
 
-from src.analysis import (
-    build_chat_model,
-    generate_insights_parallel,
-    synthesise_monthly_digest,
-)
+from src.analysis import build_chat_model, generate_insights_parallel
 from src.anti_blocking import RetryConfig, SessionLogger
 from src.config import Settings
 from src.discovery import GoogleNewsDiscoverer
@@ -156,16 +152,16 @@ def analyze(
     settings: Settings,
     selected: list[ScoredArticle],
     degradation: DegradationStatus,
-) -> tuple[list[ScoredArticle], str]:
+) -> list[ScoredArticle]:
     if not selected:
-        return [], ""
+        return []
 
     llm = build_chat_model(settings.azure, settings.llm)
 
     def progress(done: int, total: int) -> None:
         print(f"[analyze] insights {done}/{total}")
 
-    analyzed = generate_insights_parallel(
+    return generate_insights_parallel(
         llm,
         selected,
         max_article_chars=settings.llm.max_article_chars,
@@ -174,21 +170,10 @@ def analyze(
         on_progress=progress,
     )
 
-    try:
-        summary = synthesise_monthly_digest(
-            llm, analyzed, month_label=settings.run.month_label
-        )
-    except Exception as exc:  # noqa: BLE001
-        degradation.add_warning(f"Synthesis failed: {exc}")
-        summary = ""
-
-    return analyzed, summary
-
 
 def render(
     settings: Settings,
     analyzed: list[ScoredArticle],
-    summary: str,
     degradation: DegradationStatus,
 ) -> dict[str, str]:
     renderable = [a.to_renderable() for a in analyzed]
@@ -199,15 +184,8 @@ def render(
         include_degradation_warning=settings.output.include_degradation_warning,
     )
     artifacts: dict[str, str] = {
-        "detailed_docx": generator.generate_detailed_report(
-            renderable,
-            degradation_status=degradation,
-            precomputed_summary=summary,
-        ),
-        "email_html": generator.generate_email_content(
-            renderable,
-            degradation_status=degradation,
-        ),
+        "detailed_docx": generator.generate_detailed_report(renderable),
+        "email_html": generator.generate_email_content(renderable),
         "articles_xlsx": generator.generate_articles_xlsx(
             analyzed,
             degradation_status=degradation,
@@ -235,8 +213,8 @@ def run_pipeline(settings: Settings) -> dict[str, object]:
         scored = rank(settings, candidates)
         selected = fetch_select(settings, scored, pool, logger, degradation)
 
-    analyzed, summary = analyze(settings, selected, degradation)
-    artifacts = render(settings, analyzed, summary, degradation)
+    analyzed = analyze(settings, selected, degradation)
+    artifacts = render(settings, analyzed, degradation)
 
     return {
         "settings": settings,
@@ -244,7 +222,6 @@ def run_pipeline(settings: Settings) -> dict[str, object]:
         "scored": scored,
         "selected": selected,
         "analyzed": analyzed,
-        "overall_summary": summary,
         "degradation": degradation,
         "artifacts": artifacts,
     }

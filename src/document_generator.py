@@ -12,46 +12,22 @@ from typing import Any
 from docx import Document
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.shared import Inches, Pt
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import AzureChatOpenAI
 
 
 class DocumentGenerator:
     def __init__(
         self,
         output_dir: Path | str = "Output",
-        llm_instance: AzureChatOpenAI | None = None,
         *,
         month_label: str = "",
         company_name: str = "[Your Company Name]",
         include_degradation_warning: bool = True,
     ):
         self.output_dir = Path(output_dir)
-        self.llm = llm_instance
         self.month_label = month_label or datetime.now().strftime("%B %Y")
         self.company_name = company_name
         self.include_degradation_warning = include_degradation_warning
         self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        self.summary_prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are a senior research analyst at a global investment bank. "
-                    "Synthesize the key AI / AI-banking / AI-agents themes from the "
-                    "supplied articles into a brief, IB-relevant digest opening.",
-                ),
-                (
-                    "user",
-                    "Provide a concise 3-4 sentence overall synthesis for {month_label} "
-                    "based on the following articles:\n\n{article_summaries}\n\nOverall Summary:",
-                ),
-            ]
-        )
-        if self.llm:
-            self.summary_chain = self.summary_prompt | self.llm
-        else:
-            self.summary_chain = None
 
     def _set_doc_margins(self, document):
         sections = document.sections
@@ -149,53 +125,7 @@ class DocumentGenerator:
             f"Collected Results: {collected} articles"
         )
 
-    def _generate_overall_summary(
-        self,
-        top_articles: list[dict],
-        precomputed_summary: str | None = None,
-    ) -> str:
-        """Return the digest's opening synthesis.
-
-        If `precomputed_summary` is provided (the standard path from the
-        pipeline), it is returned directly. Falls back to the local LLM
-        chain only when the caller does not have one and an LLM was
-        configured at construction time.
-        """
-        if precomputed_summary and precomputed_summary.strip():
-            return precomputed_summary.strip()
-
-        if not self.llm or not self.summary_chain:
-            return "Overall summary could not be generated (no precomputed summary and no LLM configured)."
-
-        summary_input = []
-        for item in top_articles:
-            title = item.get("article", {}).get("title", "No Title")
-            insight = item.get("analysis", {}).get("insights", "N/A")
-            insight_str = str(insight) if insight else "N/A"
-            summary_input.append(f"Title: {title}\nInsight: {insight_str}\n---")
-
-        if not summary_input:
-            return "No articles available to generate a summary."
-
-        try:
-            print("Generating overall summary with LLM (fallback path)...")
-            response = self.summary_chain.invoke(
-                {
-                    "article_summaries": "\n".join(summary_input),
-                    "month_label": self.month_label,
-                }
-            )
-            return str(response.content)
-        except Exception as e:
-            print(f"Error generating overall summary with LLM: {e}")
-            return f"Overall summary could not be generated due to an error: {e}"
-
-    def generate_detailed_report(
-        self,
-        top_articles: list[dict],
-        degradation_status: Any | None = None,
-        precomputed_summary: str | None = None,
-    ):
+    def generate_detailed_report(self, top_articles: list[dict]):
         """Generates a detailed Word document report including a table of contents."""
         document = Document()
         self._set_doc_margins(document)
@@ -216,36 +146,7 @@ class DocumentGenerator:
             size=10,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         )
-
-        if (
-            self.include_degradation_warning
-            and degradation_status
-            and getattr(degradation_status, "is_degraded", False)
-        ):
-            document.add_paragraph()
-            self._add_styled_paragraph(
-                document, "[WARN] DEGRADATION WARNING", size=12, bold=True
-            )
-            warning_text = (
-                "This report was generated under degraded conditions due to sustained blocking/errors.\n"
-                + self._format_degradation_summary(degradation_status, len(top_articles))
-            )
-            self._add_styled_paragraph(document, warning_text, size=10)
-            if degradation_status.warnings:
-                for warning in degradation_status.warnings[:5]:
-                    self._add_styled_paragraph(document, f"  • {warning}", size=9)
-
         document.add_paragraph()
-
-        # Monthly themes synthesis (uses precomputed summary from the pipeline,
-        # falls back to a local LLM call if provided one at construction time).
-        overall_summary_text = self._generate_overall_summary(
-            top_articles, precomputed_summary=precomputed_summary
-        )
-        if overall_summary_text:
-            self._add_styled_paragraph(document, "Monthly Themes", size=14, bold=True)
-            self._add_styled_paragraph(document, overall_summary_text, size=11)
-            document.add_paragraph()
 
         # Add Table of Contents
         self._add_styled_paragraph(document, "Table of Contents", size=14, bold=True)
@@ -292,11 +193,7 @@ class DocumentGenerator:
         document.save(filepath)
         return str(filepath)
 
-    def generate_email_content(
-        self,
-        top_articles: list[dict],
-        degradation_status: Any | None = None,
-    ) -> str:
+    def generate_email_content(self, top_articles: list[dict]) -> str:
         """Generates HTML content ready for copying into Outlook email."""
 
         month_label = self.month_label
@@ -487,25 +384,6 @@ class DocumentGenerator:
                     This digest highlights the most material developments in AI, AI in banking and finance,
                     and AI agents from {month_label}. Click any article title to read the full story.
                 </p>"""
-
-        if (
-            self.include_degradation_warning
-            and degradation_status
-            and getattr(degradation_status, "is_degraded", False)
-        ):
-            summary_line = self._format_degradation_summary(
-                degradation_status, len(top_articles)
-            )
-            html_content += f"""
-                <div style="margin-top: 15px; padding: 15px; background-color: #fff3cd; border-left: 4px solid #ffc107;">
-                    <p style="margin: 0; color: #856404; font-weight: bold; font-size: 11pt;">
-                        [WARN] DEGRADATION WARNING
-                    </p>
-                    <p style="margin: 5px 0 0 0; color: #856404; font-size: 10pt;">
-                        This report was generated under degraded conditions due to sustained blocking/errors.<br>
-                        {summary_line}
-                    </p>
-                </div>"""
 
         html_content += """
                         </p>
