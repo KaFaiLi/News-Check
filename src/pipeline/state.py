@@ -6,14 +6,12 @@ update. LangGraph merges the partial dict into the running state.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 
+from src.anti_blocking import SessionLogger
 from src.config import Settings
+from src.extraction import BrowserPool
 from src.models import Article, DegradationStatus, ScoredArticle
-
-if TYPE_CHECKING:
-    from src.anti_blocking import SessionLogger
-    from src.extraction import BrowserPool
 
 
 class PipelineState(TypedDict, total=False):

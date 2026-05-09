@@ -174,6 +174,39 @@ def test_pool_exhausted_before_floor_met_marks_degraded(tmp_path, selection_sett
     assert any("AI banking floor" in w for w in deg.warnings)
 
 
+def test_does_not_overshoot_when_banking_ranks_low(tmp_path, selection_settings):
+    """Regression: when banking articles are scattered through a fat candidate
+    pool with non-banking on top, the streamer must not walk the whole pool.
+    With top_n=10 and floor=3, total submissions should stay close to top_n
+    plus a small in-flight buffer, not hundreds."""
+    # 100 non-banking on top, 10 banking sprinkled lower.
+    pool: list[ScoredArticle] = []
+    for i in range(100):
+        pool.append(_scored(url=f"http://nb{i}.example/1", score=1000 - i, banking=False))
+    for i in range(10):
+        pool.append(_scored(url=f"http://b{i}.example/1", score=500 - i, banking=True))
+    fake = _FakePool(lambda url: True)
+
+    selected, deg = fetch_and_select(
+        pool,
+        selection=selection_settings,
+        pool=fake,  # type: ignore[arg-type]
+        cache_dir=tmp_path,
+        max_markdown_length=10_000,
+        retry_cfg=_retry_cfg(),
+        logger=None,
+    )
+    assert len(selected) == 10
+    banking = sum(1 for s in selected if Topic.AI_BANKING in s.article.appeared_in_topics)
+    assert banking >= 3
+    assert not deg.is_degraded
+    # The streamer reserves (top_n - floor) = 7 non-banking slots. With all
+    # fetches succeeding, we expect at most ~10 submissions plus the
+    # pool.size in-flight pre-fill. Bound generously at 20 to allow for
+    # implementation slack but catch regressions to whole-pool walks.
+    assert len(fake.calls) <= 20, f"unexpectedly walked {len(fake.calls)} candidates"
+
+
 def test_per_source_cap_enforced_during_streaming(tmp_path, selection_settings):
     """Domain `busy.example` has 10 candidates; cap of 3 should hold even though
     they're all at the top of the rank."""

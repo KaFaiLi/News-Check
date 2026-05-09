@@ -193,18 +193,63 @@ def fetch_and_select(
     failed = 0
     candidate_iter = iter(ranked)
     pending: dict[Future, ScoredArticle] = {}
+    deferred_non_banking: list[ScoredArticle] = []
+
+    non_banking_budget = max(0, selection.top_n - selection.ai_banking_minimum_floor)
 
     def banking_count() -> int:
         return sum(1 for s in successes if _is_banking(s))
+
+    def banking_in_flight() -> int:
+        return sum(1 for sa in pending.values() if _is_banking(sa))
+
+    def non_banking_load() -> int:
+        # Successes + in-flight that, on success, would land in non-banking.
+        return (len(successes) - banking_count()) + (len(pending) - banking_in_flight())
 
     def have_enough() -> bool:
         if len(successes) < selection.top_n:
             return False
         return banking_count() >= selection.ai_banking_minimum_floor
 
-    def submit_next() -> bool:
+    def submit_next(*, allow_overflow: bool = False) -> bool:
+        # Topic-aware submission. We reserve `ai_banking_minimum_floor` slots
+        # for banking by capping non-banking submissions+in-flight at
+        # `top_n - floor`. This keeps banking eligible to fill the floor
+        # even when banking articles rank below non-banking ones, and
+        # bounds total fetches near top_n + a small in-flight buffer.
+        # Skipped non-banking candidates are stashed in `deferred_non_banking`
+        # so the fallback pass can use them if banking turns out to be too
+        # thin to meet the floor.
         nonlocal submitted
         for sa in candidate_iter:
+            domain = sa.article.domain or "unknown"
+            if domain_success[domain] >= selection.max_articles_per_source:
+                continue
+            if (
+                not allow_overflow
+                and not _is_banking(sa)
+                and non_banking_load() >= non_banking_budget
+            ):
+                deferred_non_banking.append(sa)
+                continue
+            future = pool.submit(
+                _extract_one_task,
+                sa,
+                cache_dir=cache_dir,
+                max_markdown_length=max_markdown_length,
+                retry_cfg=retry_cfg,
+                logger=logger,
+            )
+            pending[future] = sa
+            submitted += 1
+            return True
+        return False
+
+    def submit_next_deferred() -> bool:
+        nonlocal submitted
+        while deferred_non_banking:
+            sa = deferred_non_banking.pop(0)
             domain = sa.article.domain or "unknown"
             if domain_success[domain] >= selection.max_articles_per_source:
                 continue
@@ -252,6 +297,21 @@ def fetch_and_select(
             consume(fut)
             if not have_enough():
                 submit_next()
+
+    # Fallback: candidate pool is exhausted (or only non-banking left) and we
+    # still don't have top_n successes. The deferred non-banking pile is the
+    # remainder we held back to keep room for banking; release it now to top
+    # up. (If banking turned out to be plentiful, this list is empty.)
+    if not have_enough() and len(successes) < selection.top_n:
+        for _ in range(pool.size):
+            if not submit_next_deferred():
+                break
+        while pending and len(successes) < selection.top_n:
+            done, _ = wait(set(pending), return_when=FIRST_COMPLETED)
+            for fut in done:
+                consume(fut)
+                if len(successes) < selection.top_n:
+                    submit_next_deferred()
 
     for fut in list(pending):
         consume(fut)
