@@ -1,273 +1,254 @@
 # News-Check
 
-A Python-based news aggregation and analysis tool that fetches, analyzes, and summarizes news articles from various sources with **intelligent anti-blocking mechanisms** for reliable daily operation.
+News-Check generates a monthly AI news digest for investment-banking readers. It discovers candidate stories from Google News, ranks them using metadata, fetches only the highest-value articles through Playwright Edge, analyzes the selected set with Azure OpenAI, and renders three output artifacts:
 
-## ✨ Key Features
+- a detailed Word report
+- an HTML email body
+- an Excel workbook of scored articles
 
-### News Aggregation & Analysis
-- **News Aggregation**: Fetches news articles from Google News with HTML scraping
-- **Content Analysis**: Analyzes article content using keyword matching and LLM-based insights
-- **Source Reliability Scoring**: 3-tier credibility system prioritizes premium news sources (CNN, BBC, NYT, etc.)
-- **Trending Analysis**: Identifies trending topics and calculates article relevance scores
-- **Category-based Filtering**: Organizes articles into categories (AI Development, Fintech, GenAI Usage)
-- **Minimum Category Requirements**: Ensures minimum representation of Fintech articles (at least 3) in top results
-- **Full HTML Conversion**: Extracts entire article HTML and converts to markdown for LLM analysis
-- **Smart Content Extraction**: Handles paywalled content using Playwright with stealth mode
-- **Source Diversity**: Caps articles per source (default: 3) to ensure variety
-- **Automated Summaries**: Generates both brief and detailed summaries of news articles
-- **Email-ready Output**: Creates formatted HTML content ready for email distribution
+This project is designed for a manual monthly run. It is not a long-running service and it does not use CLI flags for run-time configuration.
 
-### 🛡️ Anti-Blocking System (NEW)
-- **Intelligent Block Detection**: Automatically detects and classifies blocks (rate limits, CAPTCHAs, timeouts)
-- **Exponential Backoff Retry**: Smart retry with increasing delays (max 5 attempts)
-- **User Agent Rotation**: Rotates through legitimate browser user agents on 403/429 responses
-- **Graceful Degradation**: Collects partial results when sustained blocking occurs
-- **Comprehensive Logging**: JSON-based session logs for all retry events
-- **Degradation Warnings**: Visible alerts in reports when operating under degraded conditions
+## Pipeline
 
-**See [Anti-Blocking Guide](docs/ANTI_BLOCKING_GUIDE.md) for detailed documentation.**
+1. Discover candidate articles from Google News across three topic buckets:
+   - AI
+   - AI in banking and finance
+   - AI agents
+2. Rank the full candidate pool using metadata only:
+   - title and snippet relevance
+   - source tier
+   - recency
+   - cross-source consensus
+3. Stream extraction in score order through a shared Playwright Edge browser pool.
+4. Keep walking the ranked pool until selection rules are satisfied:
+   - top 10 articles
+   - at least 3 AI-banking stories
+   - maximum 3 articles per source
+5. Generate per-article investment-banking insights in parallel with Azure OpenAI.
+6. Render final artifacts into the Output directory.
+
+The key efficiency choice is rank-then-stream-fetch: the pipeline usually fetches only the articles needed to fill the final selection instead of downloading the full candidate pool.
+
+## Constraints
+
+These are intentional project rules, not suggestions:
+
+- Package management is uv only.
+- Web fetching uses Playwright with the Edge channel only.
+- LLM calls use LangChain plus Azure OpenAI only.
+- Run-time tunables live in config.toml.
+- Secrets live in .env.
+- There are no CLI flags for changing run behavior.
 
 ## Requirements
 
-- Python 3.8+
-- Required Python packages (see `requirements.txt`):
-  - pandas
-  - python-docx
-  - beautifulsoup4
-  - requests
-  - fuzzywuzzy
-  - python-Levenshtein
-  - langchain
-  - langchain-core
-  - langchain-openai
-  - playwright
-  - html2text
-  - tenacity (for retry logic)
+- Python 3.11+
+- uv
+- Playwright Edge channel installed via Playwright
+- Azure OpenAI deployment and credentials
 
-## Installation
+## Quick Start
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/News-Check.git
+1. Clone the repository and move into it.
+
+```powershell
+git clone <your-repo-url>
 cd News-Check
 ```
 
-2. Install required packages:
-```bash
-pip install -r requirements.txt
+2. Install dependencies.
+
+```powershell
+uv sync
 ```
 
-3. Install Playwright browsers:
-```bash
-playwright install
+3. Install the Playwright Edge browser channel.
+
+```powershell
+uv run playwright install msedge
 ```
 
-4. Set up environment variables:
-Create a `.env` file with your OpenAI API key:
-```
-OPENAI_API_KEY=your_api_key_here
-```
+4. Copy `.env.example` to `.env` and fill in your Azure OpenAI values.
 
-## Usage
-
-1. Run the main script:
-```bash
-python main.py
+```env
+AZURE_OPENAI_API_KEY=
+AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT=gpt-4.1-nano
+AZURE_OPENAI_API_VERSION=2024-02-01
 ```
 
-2. The script will:
-   - Fetch recent news articles
-   - Analyze and categorize them
-   - Ensure minimum Fintech article representation
-   - Generate summaries and reports
-   - Create email-ready content
+5. Edit `config.toml` for the month you want to cover and any query, scoring, or output changes.
 
-3. Output files will be created in the `Output` directory:
-   - `brief_news_summary_[timestamp].docx`: Concise summary of top articles
-   - `detailed_news_report_[timestamp].docx`: Detailed analysis of all articles
-   - `email_content_[timestamp].html`: Formatted HTML for email distribution
-   - `news_articles.xlsx`: Raw article data
+6. Run the pipeline.
+
+```powershell
+uv run python -m src
+```
+
+Equivalent entry point:
+
+```powershell
+uv run main.py
+```
 
 ## Configuration
 
-The script can be configured by modifying the following parameters in `src/config.py`:
+### `.env`
 
-### Basic Configuration
-- `OPENAI_API_KEY`: Your OpenAI API key
-- `OPENAI_API_BASE`: Base URL for OpenAI API (Azure OpenAI endpoint)
-- `USE_LLM`: Enable/disable LLM-based analysis (default: True)
-- `LLM_THRESHOLD`: Score threshold for LLM analysis (default: 0.1)
-- `OUTPUT_DIR`: Directory for output files (default: 'Output')
+Azure OpenAI secrets are loaded from `.env`:
 
-### Source Reliability Configuration
-- `SOURCE_RELIABILITY_TIER_1`: List of premium news sources (CNN, BBC, NYT, etc.)
-- `SOURCE_RELIABILITY_TIER_2`: List of established industry outlets (TechCrunch, Forbes, etc.)
-- `TIER_1_MULTIPLIER`: Score boost for tier-1 sources (default: 1.3)
-- `TIER_2_MULTIPLIER`: Score boost for tier-2 sources (default: 1.1)
-- `TIER_3_MULTIPLIER`: Score baseline for unranked sources (default: 1.0)
-- `SCORE_WEIGHT_KEYWORD`: Weight for keyword relevance (default: 0.5 = 50%)
-- `SCORE_WEIGHT_TRENDING`: Weight for trending score (default: 0.3 = 30%)
-- `SCORE_WEIGHT_SOURCE`: Weight for source reliability (default: 0.2 = 20%)
-- `MAX_ARTICLES_PER_SOURCE`: Maximum articles per source in results (default: 3)
-- `MAX_MARKDOWN_LENGTH`: Maximum markdown length for LLM (default: 400,000 characters)
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_DEPLOYMENT`
+- `AZURE_OPENAI_API_VERSION`
 
-**Example: Adding a new tier-1 source**
-```python
-# In src/config.py
-SOURCE_RELIABILITY_TIER_1 = [
-    'cnn.com', 'bbc.com', 'nytimes.com',
-    'economist.com'  # Add new source here
-]
+The loader prefers the repo-local `.env` file over inherited shell variables, so the workspace configuration wins even if your terminal already has Azure variables set.
+
+### `config.toml`
+
+All run-time behavior lives in `config.toml`.
+
+| Section | Purpose |
+| --- | --- |
+| `[run]` | Date window and candidate count per topic |
+| `[topics]` | Google News queries for AI, AI banking, and AI agents |
+| `[selection]` | Final top-N size, AI-banking floor, per-source cap |
+| `[scoring]` | Weights for topic relevance, consensus, source tier, recency |
+| `[sources]` | Tiered publisher lists and multipliers |
+| `[anti_blocking]` | Retry attempts, backoff, random delay, degradation threshold |
+| `[parallelism]` | Worker counts for discovery, extraction, and analysis |
+| `[output]` | Output directory, company name, markdown cap |
+| `[llm]` | Temperature and per-article content truncation |
+
+If `run.date_from` and `run.date_to` are not set, the pipeline defaults to the previous calendar month.
+
+## Running the Digest
+
+Run:
+
+```powershell
+uv run python -m src
 ```
 
-**Example: Adjusting scoring weights**
-```python
-# More emphasis on source reliability
-SCORE_WEIGHT_KEYWORD = 0.4  # 40%
-SCORE_WEIGHT_TRENDING = 0.3  # 30%
-SCORE_WEIGHT_SOURCE = 0.3   # 30%
+The console prints:
+
+- the selected date window
+- target article count and AI-banking floor
+- degradation warnings if extraction quality drops
+- final artifact paths
+
+Failures inside a stage are tracked as degradation rather than always aborting the run. That means a partially degraded run can still produce usable output, with details captured in retry logs.
+
+## Output Artifacts
+
+The pipeline writes files under `Output/`.
+
+### Final artifacts
+
+- `Output/detailed_news_report_YYYYMMDD_HHMMSS.docx`
+- `Output/email_content_YYYYMMDD_HHMMSS.html`
+- `Output/news_articles_YYYYMMDD_HHMMSS.xlsx`
+
+### Supporting artifacts
+
+- `Output/article_content/<urlhash>.md` cached article markdown
+- `Output/retry_logs/<session_id>_retry_log.json` retry and degradation audit trail
+
+The email renderer includes the top 3 selected stories. The Word report renders the full selected set.
+
+## Repository Layout
+
+```text
+.
+|-- main.py
+|-- config.toml
+|-- pyproject.toml
+|-- src/
+|   |-- __main__.py
+|   |-- config.py
+|   |-- document_generator.py
+|   |-- models.py
+|   |-- analysis/
+|   |   |-- insights.py
+|   |   |-- llm.py
+|   |   `-- parallel_insights.py
+|   |-- anti_blocking/
+|   |   |-- block_detector.py
+|   |   |-- retry_policy.py
+|   |   |-- session_logger.py
+|   |   `-- user_agents.py
+|   |-- discovery/
+|   |   |-- google_news.py
+|   |   `-- publishers.py
+|   |-- extraction/
+|   |   |-- browser.py
+|   |   |-- browser_pool.py
+|   |   |-- fetcher.py
+|   |   |-- markdown.py
+|   |   `-- parallel_fetcher.py
+|   |-- pipeline/
+|   |   `-- graph.py
+|   `-- ranking/
+|       `-- scorer.py
+`-- tests/
 ```
 
-**See [Source Reliability Configuration Guide](docs/SOURCE_RELIABILITY_CONFIG.md) for detailed documentation.**
+## Development
 
-### Anti-Blocking Configuration
-- `MAX_RETRY_ATTEMPTS`: Maximum retry attempts for blocked requests (default: 5)
-- `INITIAL_BACKOFF_DELAY`: Initial backoff delay in seconds (default: 1)
-- `MAX_BACKOFF_DELAY`: Maximum backoff delay cap (default: 60)
-- `RANDOM_DELAY_RANGE`: Random delay between requests in seconds (default: (1, 5))
-- `USER_AGENT_POOL`: List of user agents for rotation
+Install dev dependencies with the normal sync:
 
-### Degradation Settings
-- `ENABLE_GRACEFUL_DEGRADATION`: Enable degradation mode (default: True)
-- `MIN_SUCCESS_THRESHOLD`: Minimum success rate before degrading (default: 0.6)
-- `MAX_CONSECUTIVE_FAILURES`: Max failures before degraded mode (default: 3)
-- `COLLECT_PARTIAL_RESULTS`: Collect partial results on failure (default: True)
-- `INCLUDE_DEGRADATION_WARNING`: Add warnings to reports (default: True)
-
-**See [Anti-Blocking Guide](docs/ANTI_BLOCKING_GUIDE.md) for detailed configuration examples.**
-
-## Article Categories
-
-Articles are categorized into:
-- **AI Development**: Articles about AI research, neural networks, and technical developments
-- **Fintech**: Articles about financial technology, digital banking, and payment systems
-- **GenAI Usage**: Articles about generative AI applications and implementations
-- **Other**: Articles that don't fit into the above categories
-
-## Minimum Category Requirements
-
-The system ensures that at least 3 Fintech articles are included in the top results. If fewer than 3 Fintech articles are found in the initial top results:
-1. The system will look for additional Fintech articles in the remaining pool
-2. Lower-scoring non-Fintech articles will be replaced with higher-scoring Fintech articles
-3. If insufficient Fintech articles are available, a warning will be displayed
-
-## Error Handling
-
-The system includes robust error handling for:
-- **Network issues**: Automatic retry with exponential backoff
-- **Rate limiting (429)**: User agent rotation and backoff delays
-- **Forbidden responses (403)**: User agent rotation
-- **Server errors (5xx)**: Retry with appropriate delays
-- **Paywalled content**: Playwright stealth mode extraction
-- **CAPTCHA detection**: Skip non-retryable blocks
-- **Invalid URLs**: Graceful error logging
-- **Content extraction failures**: Fallback to preview content
-- **Sustained blocking**: Graceful degradation with partial results
-- **API rate limits**: Automatic backoff and retry
-
-All errors are logged to:
-- **Console**: Real-time feedback with emoji indicators
-- **Retry Logs**: `Output/retry_logs/{session_id}_retry_log.json`
-- **Error Files**: `Output/article_content/errors/error_{article_id}.json`
-
-## Monitoring & Logs
-
-### Retry Logs
-Location: `Output/retry_logs/`
-
-Each session creates a timestamped JSON log with:
-- All retry events with metadata
-- Block types detected
-- Wait times and cumulative delays  
-- User agent rotation events
-- Degradation status
-
-### Console Output
-Real-time status indicators:
-```
-✓ HTML fetched successfully
-⚠️ Block type: rate_limit. Retrying (2/5) after 2.0s...
-⚠️ Entering degraded mode: 3 consecutive failures
+```powershell
+uv sync
 ```
 
-### Report Warnings
-Degradation warnings automatically appear in:
-- Word documents (brief and detailed)
-- HTML email content
-- Console summary
+Run tests:
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Directory Structure
-
-```
-News-Check/
-├── main.py                          # Main entry point
-├── src/
-│   ├── __init__.py                 # Package initialization
-│   ├── news_scraper_simple.py      # News scraping with anti-blocking
-│   ├── content_analyzer_simple.py  # Content analysis with retry logic
-│   ├── document_generator.py       # Document generation with warnings
-│   ├── config.py                   # Configuration settings
-│   ├── models.py                   # Pydantic data models
-│   ├── retry_policy.py             # Retry decorator and backoff logic
-│   ├── block_detector.py           # Block detection and classification
-│   ├── user_agent_pool.py          # User agent rotation
-│   └── retry_logger.py             # Session-based JSON logging
-├── tests/                          # Comprehensive test suite
-│   ├── test_block_detector.py      # Block detection tests
-│   ├── test_retry_logger.py        # Logging tests
-│   ├── test_degradation.py         # Degradation tests
-│   ├── test_content_analyzer.py    # Analyzer tests
-│   └── test_document_generator.py  # Generator tests
-├── docs/
-│   └── ANTI_BLOCKING_GUIDE.md      # Detailed anti-blocking documentation
-├── Output/                         # Generated reports and logs
-│   ├── retry_logs/                 # Session retry logs
-│   └── article_content/            # Fetched article content
-└── requirements.txt                # Project dependencies
+```powershell
+uv run pytest --no-cov
 ```
 
-## Testing
+Run a focused test file:
 
-Run the comprehensive test suite:
-
-```bash
-# Run all tests
-python -m pytest
-
-# Run with coverage
-python -m pytest --cov=src --cov-report=html
-
-# Run specific test modules
-python -m pytest tests/test_block_detector.py -v
-python -m pytest tests/test_degradation.py -v
-python -m pytest tests/test_retry_logger.py -v
-
-# Run live integration test (requires internet)
-python test_integration_live.py
+```powershell
+uv run pytest tests/test_parallel_fetcher.py -v
 ```
 
-**Test Coverage**: 76 tests covering all anti-blocking features, degradation scenarios, and core functionality.
+Run a focused test selection:
 
-## Acknowledgments
+```powershell
+uv run pytest -k "banking_floor"
+```
 
-- Google News for providing news data
-- OpenAI for language model support
-- Various open-source libraries used in this project
+Run linting:
+
+```powershell
+uv run ruff check src tests
+```
+
+Coverage is enabled by default through `pytest.ini`; pass `--no-cov` for faster local iteration.
+
+## Notes For Changes
+
+- To change topics or search coverage, edit `config.toml`.
+- To change ranking behavior, edit `src/ranking/scorer.py` and the scoring weights in `config.toml`.
+- To change selection rules such as the AI-banking floor or per-source cap, edit `src/extraction/parallel_fetcher.py` and its tests.
+- To change prompts or analysis wording, edit `src/analysis/insights.py`.
+- To change output layout or copy, edit `src/document_generator.py` and the related renderer tests.
+
+## Troubleshooting
+
+### Missing Azure settings
+
+If startup fails with a configuration error, verify that `.env` exists and contains all four `AZURE_OPENAI_*` variables.
+
+### Playwright or browser startup failures
+
+Reinstall the Edge browser channel:
+
+```powershell
+uv run playwright install msedge
+```
+
+### Degraded runs
+
+If extraction is throttled or blocked, inspect the retry log under `Output/retry_logs/` to see the failure classifications and backoff behavior.
